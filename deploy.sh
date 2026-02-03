@@ -24,74 +24,57 @@ if [ -z "$SSH_USER" ]; then
   exit 1
 fi
 
-# Helper function for SCP
-upload_scp() {
-    local SRC=$1
-    local DEST=$2
+# Helper function for Tar-Pipe deployment
+deploy_tar() {
+    local SRC_DIR=$1
+    local DEST_DIR=$2
+    
+    echo "Deploying $SRC_DIR to $DEST_DIR..."
+    
+    # Construct command: tar local -> ssh (mkdir && tar remove)
+    # We use -C to change dir before tarring to avoid path issues
+    CMD="mkdir -p $DEST_DIR && tar -xf - -C $DEST_DIR"
+    
     if [ ! -z "$SSH_PASS" ] && command -v sshpass &> /dev/null; then
-        echo "Uploading $SRC (using sshpass)..."
-        sshpass -p "$SSH_PASS" scp -P $PORT -r $SRC $SSH_USER@$HOST:$DEST
+        tar -C "$SRC_DIR" -cf - . | sshpass -p "$SSH_PASS" ssh -p $PORT $SSH_USER@$HOST "$CMD"
     else
-        echo "Uploading $SRC (manual password entry)..."
-        scp -P $PORT -r $SRC $SSH_USER@$HOST:$DEST
+        tar -C "$SRC_DIR" -cf - . | ssh -p $PORT $SSH_USER@$HOST "$CMD"
+    fi
+}
+# Special handler for root files which are individual files, not a dir content dump
+deploy_root() {
+    FILES="index.html tools.json favicon.svg"
+    CMD="tar -xf - -C $REMOTE_BASE"
+    
+    if [ ! -z "$SSH_PASS" ] && command -v sshpass &> /dev/null; then
+        tar -cf - $FILES | sshpass -p "$SSH_PASS" ssh -p $PORT $SSH_USER@$HOST "$CMD"
+    else
+        tar -cf - $FILES | ssh -p $PORT $SSH_USER@$HOST "$CMD"
     fi
 }
 
 echo ""
-echo "Deploying as user: $SSH_USER"
-if [ ! -z "$SSH_PASS" ]; then
-    if ! command -v sshpass &> /dev/null; then
-        echo "WARNING: SSH_PASS found in .env but 'sshpass' is not installed."
-        echo "You will still be prompted for the password."
-        echo "To automate fully, install sshpass (e.g., apt-get install sshpass)."
-    else
-        echo "Password found in .env - employing sshpass for automation."
-    fi
-fi
-echo ""
-# Menu Selection
-echo "What would you like to deploy?"
-echo "0) Everything"
-echo "1) Root Portal (index.html)"
-echo "2) Potential"
-echo "3) Evaluate"
-echo "4) JSON Vision"
-echo "5) Meeting Ticker"
-echo ""
-read -p "Enter Choice (0-5): " CHOICE
-
-echo ""
 read -p "Press Enter to start deployment..."
 
-# 2. Deploy Root Files (index.html, favicon)
-if [[ "$CHOICE" == "0" || "$CHOICE" == "1" ]]; then
-    echo "---------------------------------------------"
-    upload_scp "index.html favicon.svg" "$REMOTE_BASE/"
-fi
+# 1. Always Deploy Root Files
+echo "---------------------------------------------"
+echo "Deploying Root Portal (index.html, tools.json, favicon)..."
+deploy_root
 
-# 3. Deploy Potential
-if [[ "$CHOICE" == "0" || "$CHOICE" == "2" ]]; then
-    echo "---------------------------------------------"
-    upload_scp "potential/dist/." "$REMOTE_BASE/potential/"
-fi
-
-# 4. Deploy Evaluate
-if [[ "$CHOICE" == "0" || "$CHOICE" == "3" ]]; then
-    echo "---------------------------------------------"
-    upload_scp "evaluate/dist/." "$REMOTE_BASE/evaluate/"
-fi
-
-# 5. Deploy JSON Vision
-if [[ "$CHOICE" == "0" || "$CHOICE" == "4" ]]; then
-    echo "---------------------------------------------"
-    upload_scp "json-vision/dist/." "$REMOTE_BASE/json-vision/"
-fi
-
-# 6. Deploy Meeting Ticker
-if [[ "$CHOICE" == "0" || "$CHOICE" == "5" ]]; then
-    echo "---------------------------------------------"
-    upload_scp "meeting-ticker/dist/." "$REMOTE_BASE/meeting-ticker/"
-fi
+# 2. Deploy Tools
+index=0
+menu_index=2
+for id in "${TOOL_IDS[@]}"; do
+  if [[ "$CHOICE" == "0" || "$CHOICE" == "$menu_index" ]]; then
+      name="${TOOL_NAMES[$index]}"
+      echo "---------------------------------------------"
+      echo "Deploying $name..."
+      
+      deploy_tar "$id/dist" "$REMOTE_BASE/$id"
+  fi
+  ((index++))
+  ((menu_index++))
+done
 
 echo ""
 echo "============================================="

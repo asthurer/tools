@@ -31,7 +31,7 @@
     </style>
 </head>
 
-<body class="bg-gradient-to-br from-slate-50 via-gray-100 to-indigo-50 min-h-screen relative overflow-hidden">
+<body class="bg-gradient-to-br from-slate-50 via-gray-100 to-indigo-50 min-h-screen relative overflow-x-hidden">
     <!-- Decorative Background blobs -->
     <div
         class="absolute top-0 left-0 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob">
@@ -56,171 +56,110 @@
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
 
-            <!-- Potential Tool Card -->
-            <a href="/tools/potential/" class="group block h-full">
-                <div
-                    class="glass rounded-2xl p-8 h-full card-hover border border-white/50 relative overflow-hidden group-hover:border-orange-200">
-                    <div class="absolute top-0 right-0 p-4 opacity-50 group-hover:opacity-100 transition-opacity">
-                        <svg class="w-8 h-8 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                        </svg>
-                    </div>
-
-                    <div class="flex items-center space-x-4 mb-6">
-                        <div
-                            class="p-3 bg-gradient-to-br from-orange-400 to-yellow-500 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
-                            <!-- Placeholder icon matching the favicon feel -->
-                            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z">
-                                </path>
-                            </svg>
-                        </div>
-                        <h2 class="text-2xl font-bold text-gray-800 group-hover:text-orange-600 transition-colors">
-                            Potential Assessment</h2>
-                    </div>
-
-                    <p class="text-gray-600 mb-6 leading-relaxed">
-                        Evaluates candidate potential based on intellectual, emotional, and social traits. Generates
-                        detailed reports and visualizations.
-                    </p>
-
-                    <div
-                        class="flex items-center text-orange-600 font-medium group-hover:translate-x-2 transition-transform">
-                        <span>Launch Tool</span>
-                        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
-                        </svg>
-                    </div>
-                </div>
-            </a>
-
-            <!-- Evaluate Tool Card -->
-            <a href="/tools/evaluate/" class="group block h-full">
-                <div
-                    class="glass rounded-2xl p-8 h-full card-hover border border-white/50 relative overflow-hidden group-hover:border-blue-200">
-                    <div class="absolute top-0 right-0 p-4 opacity-50 group-hover:opacity-100 transition-opacity">
-                        <svg class="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-
-                    <div class="flex items-center space-x-4 mb-6">
-                        <div
-                            class="p-3 bg-gradient-to-br from-blue-400 to-cyan-500 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
-                            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4">
-                                </path>
-                            </svg>
-                        </div>
-                        <h2 class="text-2xl font-bold text-gray-800 group-hover:text-blue-600 transition-colors">
-                            Qualification Portal</h2>
-                    </div>
-
-                    <p class="text-gray-600 mb-6 leading-relaxed">
-                        Data operations qualification and results portal. Track candidate performance and manage
-                        evaluation metrics securely.
-                    </p>
-
-                    <div
-                        class="flex items-center text-blue-600 font-medium group-hover:translate-x-2 transition-transform">
-                        <span>Launch Tool</span>
-                        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
-                        </svg>
-                    </div>
-                </div>
-            </a>
-
-            <!-- JSON Vision Card -->
-            <a href="/tools/json-vision/" class="group block h-full">
-                <div
-                    class="glass rounded-2xl p-8 h-full card-hover border border-white/50 relative overflow-hidden group-hover:border-emerald-200">
-                    <div class="absolute top-0 right-0 p-4 opacity-50 group-hover:opacity-100 transition-opacity">
-                        <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
-                        </svg>
-                    </div>
-
-                    <div class="flex items-center space-x-4 mb-6">
-                        <div
-                            class="p-3 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
-                            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 6h16M4 12h16m-7 6h7"></path>
-                            </svg>
-                        </div>
-                        <h2 class="text-2xl font-bold text-gray-800 group-hover:text-emerald-600 transition-colors">JSON
-                            Vision</h2>
-                    </div>
-
-                    <p class="text-gray-600 mb-6 leading-relaxed">
-                        Formatter and validator for JSON data. Clean up messy APIs responses and debug data structures
-                        instantly.
-                    </p>
-
-                    <div
-                        class="flex items-center text-emerald-600 font-medium group-hover:translate-x-2 transition-transform">
-                        <span>Launch Tool</span>
-                        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
-                        </svg>
-                    </div>
-                </div>
-            </a>
-
-            <!-- Meeting Ticker Card -->
-            <a href="/tools/meeting-ticker/" class="group block h-full">
-                <div
-                    class="glass rounded-2xl p-8 h-full card-hover border border-white/50 relative overflow-hidden group-hover:border-red-200">
-                    <div class="absolute top-0 right-0 p-4 opacity-50 group-hover:opacity-100 transition-opacity">
-                        <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-
-                    <div class="flex items-center space-x-4 mb-6">
-                        <div
-                            class="p-3 bg-gradient-to-br from-red-400 to-rose-500 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
-                            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
-                                </path>
-                            </svg>
-                        </div>
-                        <h2 class="text-2xl font-bold text-gray-800 group-hover:text-red-600 transition-colors">Meeting
-                            Ticker</h2>
-                    </div>
-
-                    <p class="text-gray-600 mb-6 leading-relaxed">
-                        Real-time meeting cost calculator. Visualize the cost of time to improve efficiency and reduce
-                        waste.
-                    </p>
-
-                    <div
-                        class="flex items-center text-red-600 font-medium group-hover:translate-x-2 transition-transform">
-                        <span>Launch Tool</span>
-                        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
-                        </svg>
-                    </div>
-                </div>
-            </a>
-
+            <!-- Dynamic Tools Container -->
+            <div id="tools-container" class="contents">
+                <!-- Cards will be injected here by JS -->
+            </div>
         </div>
 
-        <footer class="mt-20 text-center text-gray-400 text-sm">
-            <p>&copy; 2026 Developer Tools Suite. All rights reserved.</p>
-        </footer>
+        <script>
+            async function loadTools() {
+                try {
+                    const response = await fetch('tools.json');
+                    const tools = await response.json();
+                    const container = document.getElementById('tools-container');
+
+                    const colorMap = {
+                        orange: {
+                            text: 'text-orange-600',
+                            bg: 'text-orange-400',
+                            border: 'group-hover:border-orange-200',
+                            launch: 'text-orange-600'
+                        },
+                        blue: {
+                            text: 'text-blue-600',
+                            bg: 'text-blue-400',
+                            border: 'group-hover:border-blue-200',
+                            launch: 'text-blue-600'
+                        },
+                        emerald: {
+                            text: 'text-emerald-600',
+                            bg: 'text-emerald-400',
+                            border: 'group-hover:border-emerald-200',
+                            launch: 'text-emerald-600'
+                        },
+                        red: {
+                            text: 'text-red-600',
+                            bg: 'text-red-400',
+                            border: 'group-hover:border-red-200',
+                            launch: 'text-red-600'
+                        },
+                        indigo: {
+                            text: 'text-indigo-600',
+                            bg: 'text-indigo-400',
+                            border: 'group-hover:border-indigo-200',
+                            launch: 'text-indigo-600'
+                        },
+                        purple: {
+                            text: 'text-purple-600',
+                            bg: 'text-purple-400',
+                            border: 'group-hover:border-purple-200',
+                            launch: 'text-purple-600'
+                        }
+                    };
+
+                    tools.forEach(tool => {
+                        const theme = colorMap[tool.color] || colorMap.orange;
+
+                        const cardHTML = `
+                        <a href="${tool.path}" class="group block h-full">
+                            <div class="glass rounded-2xl p-8 h-full card-hover border border-white/50 relative overflow-hidden ${theme.border}">
+                                <div class="absolute top-0 right-0 p-4 opacity-50 group-hover:opacity-100 transition-opacity">
+                                    <svg class="w-8 h-8 ${theme.bg}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${tool.icon}"></path>
+                                    </svg>
+                                </div>
+
+                                <div class="flex items-center space-x-4 mb-6">
+                                    <div class="p-3 bg-gradient-to-br ${tool.gradient} rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
+                                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${tool.icon}"></path>
+                                        </svg>
+                                    </div>
+                                    <h2 class="text-2xl font-bold text-gray-800 ${theme.text.replace('text-', 'group-hover:text-')} transition-colors">
+                                        ${tool.name}
+                                    </h2>
+                                </div>
+
+                                <p class="text-gray-600 mb-6 leading-relaxed">
+                                    ${tool.description}
+                                </p>
+
+                                <div class="flex items-center ${theme.launch} font-medium group-hover:translate-x-2 transition-transform">
+                                    <span>Launch Tool</span>
+                                    <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                        </a>
+                        `;
+                        container.insertAdjacentHTML('beforeend', cardHTML);
+                    });
+
+                } catch (error) {
+                    console.error('Failed to load tools:', error);
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', loadTools);
+        </script>
+
+    </div>
+
+    <footer class="mt-20 text-center text-gray-400 text-sm">
+        <p>&copy; 2026 Developer Tools Suite. All rights reserved.</p>
+    </footer>
     </div>
 
     <style>

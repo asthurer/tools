@@ -1,4 +1,4 @@
-# Deploy Tools Script (PowerShell)
+# Deploy Tools Script (PowerShell) - Dynamic Version
 
 $HOST_NAME = "s1359.use1.mysecurecloudhost.com"
 $PORT = "22"
@@ -12,8 +12,6 @@ Write-Host "=============================================" -ForegroundColor Cyan
 if (Test-Path ".env") {
     Get-Content ".env" | ForEach-Object {
         if ($_ -match "SSH_USER=(.*)") { $global:SSH_USER = $matches[1] }
-        # Note: Standard SCP in PowerShell cannot easily accept a password securely without external tools (sshpass/expect).
-        # We will use the username to pre-fill the SCP command.
     }
 }
 
@@ -34,54 +32,65 @@ Write-Host "PowerShell standard SCP does not accept password arguments for secur
 Write-Host ""
 Pause
 
+# Load tools from JSON
+$jsonContent = Get-Content "tools.json" -Raw
+$tools = $jsonContent | ConvertFrom-Json
+
 # Menu Selection
 Write-Host "What would you like to deploy?" -ForegroundColor Cyan
-Write-Host "0) Everything"
+Write-Host "0) All Tools + Root Portal"
 Write-Host "1) Root Portal (index.html)"
-Write-Host "2) Potential"
-Write-Host "3) Evaluate"
-Write-Host "4) JSON Vision"
-Write-Host "5) Meeting Ticker"
+
+$i = 2
+foreach ($tool in $tools) {
+    Write-Host "$i) $($tool.name)"
+    $tool | Add-Member -MemberType NoteProperty -Name "MenuIndex" -Value $i
+    $i++
+}
+
 Write-Host ""
-$CHOICE = Read-Host "Enter Choice (0-5)"
+$CHOICE = Read-Host "Enter Choice (0-$($i-1))"
 
 Write-Host ""
 Pause
 
-# 2. Deploy Root Files
-if ($CHOICE -eq "0" -or $CHOICE -eq "1") {
-    Write-Host "---------------------------------------------" -ForegroundColor Green
-    Write-Host "Uploading Root Portal (index.html, favicon)..."
-    scp -P $PORT index.html favicon.svg "$($SSH_USER)@$($HOST_NAME):$REMOTE_BASE/"
+# Helper function to check choice
+function Should-Deploy ($index) {
+    return ($CHOICE -eq "0" -or $CHOICE -eq "$index")
 }
 
-# 3. Deploy Potential
-if ($CHOICE -eq "0" -or $CHOICE -eq "2") {
-    Write-Host "---------------------------------------------" -ForegroundColor Green
-    Write-Host "Uploading 'Potential'..."
-    scp -P $PORT -r potential/dist/. "$($SSH_USER)@$($HOST_NAME):$REMOTE_BASE/potential/"
+# 1. Always Deploy Root Files (to ensure JSON is up to date)
+Write-Host "---------------------------------------------" -ForegroundColor Green
+Write-Host "Deploying Root Portal (index.html, tools.json, favicon)..."
+# Use tar pipe for root files
+tar -cf - index.html tools.json favicon.svg | ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf - -C $REMOTE_BASE"
+
+# 2. Deploy Tools Loop
+if ($CHOICE -ne "1") {
+    foreach ($tool in $tools) {
+        if (Should-Deploy $tool.MenuIndex) {
+            Write-Host "---------------------------------------------" -ForegroundColor Green
+            Write-Host "Deploying '$($tool.name)'..."
+            
+            $folder = $tool.id
+            $remotePath = "$REMOTE_BASE/$folder"
+            
+            # Navigate to dist, tar content, pipe to ssh which mkdirs and untars
+            if (Test-Path "$folder/dist") {
+                Push-Location "$folder/dist"
+                try {
+                    # Note: We use . in tar to capture all files in current dir
+                    tar -cf - . | ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "mkdir -p $remotePath && tar -xf - -C $remotePath"
+                } finally {
+                    Pop-Location
+                }
+            } else {
+                Write-Error "Dist folder not found for $folder! Did you build it?"
+            }
+        }
+    }
 }
 
-# 4. Deploy Evaluate
-if ($CHOICE -eq "0" -or $CHOICE -eq "3") {
-    Write-Host "---------------------------------------------" -ForegroundColor Green
-    Write-Host "Uploading 'Evaluate'..."
-    scp -P $PORT -r evaluate/dist/. "$($SSH_USER)@$($HOST_NAME):$REMOTE_BASE/evaluate/"
-}
-
-# 5. Deploy JSON Vision
-if ($CHOICE -eq "0" -or $CHOICE -eq "4") {
-    Write-Host "---------------------------------------------" -ForegroundColor Green
-    Write-Host "Uploading 'JSON Vision'..."
-    scp -P $PORT -r json-vision/dist/. "$($SSH_USER)@$($HOST_NAME):$REMOTE_BASE/json-vision/"
-}
-
-# 6. Deploy Meeting Ticker
-if ($CHOICE -eq "0" -or $CHOICE -eq "5") {
-    Write-Host "---------------------------------------------" -ForegroundColor Green
-    Write-Host "Uploading 'Meeting Ticker'..."
-    scp -P $PORT -r meeting-ticker/dist/. "$($SSH_USER)@$($HOST_NAME):$REMOTE_BASE/meeting-ticker/"
-}
 
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Cyan
