@@ -1,5 +1,6 @@
 
 import { createClient, SupabaseClient, Session } from '@supabase/supabase-js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Question, ExamResult, InterviewEvaluation, AssessmentSettings, Section } from '../types';
 import { SEED_QUESTIONS } from '../constants';
 import { SUPABASE_CONFIG } from '../config';
@@ -303,10 +304,28 @@ export const apiService = {
       return (data || []).map(e => ({
         evaluationId: e.id, candidateEmail: e.candidate_email, interviewerName: e.interviewer_name,
         level: e.level, ratings: e.ratings, notes: e.notes, finalOutcome: e.final_outcome,
-        finalComments: e.final_comments, submittedAt: e.submitted_at
+        finalComments: e.final_comments, submittedAt: e.submitted_at,
+        aiVerdict: e.notes?.['_AI_VERDICT'] ? JSON.parse(e.notes['_AI_VERDICT']) : undefined
       }));
     } catch {
       return [];
+    }
+  },
+
+  async getEvaluation(email: string): Promise<InterviewEvaluation | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.from('evaluations').select('*').eq('candidate_email', email).limit(1).single();
+      if (error) return null;
+      return {
+        evaluationId: data.id, candidateEmail: data.candidate_email, interviewerName: data.interviewer_name,
+        level: data.level, ratings: data.ratings, notes: data.notes, finalOutcome: data.final_outcome,
+        finalComments: data.final_comments, submittedAt: data.submitted_at,
+        aiVerdict: data.notes?.['_AI_VERDICT'] ? JSON.parse(data.notes['_AI_VERDICT']) : undefined
+      };
+    } catch {
+      return null;
     }
   },
 
@@ -327,5 +346,92 @@ export const apiService = {
     const { error } = await sb.from('questions').upsert(formattedQuestions, { onConflict: 'id' });
     if (error) throw error;
     return true;
+  },
+
+  async generateProbeQuestions(standardTitle: string, level: string, contextIndicators: string[]): Promise<string[]> {
+    try {
+      // Initialize GenAI - ideally this key should be in env or config
+      // For this environment, we'll try VITE_GOOGLE_API_KEY from import.meta.env
+      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+      if (!apiKey) {
+        console.warn("No Google API Key found");
+        return ["API Key missing. Please configure VITE_GOOGLE_API_KEY."];
+      }
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const prompt = `
+            You are an expert interviewer. Generate 3 specific, behavioral probe questions to assess a candidate for the leadership standard "${standardTitle}" at level "${level}".
+            
+            Context - Positive Indicators for this standard:
+            ${contextIndicators.map(i => `- ${i}`).join('\n')}
+
+            Output EXACTLY 3 questions, one per line. Do not include numbering or prefixes like "1.".
+          `;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      return text.split('\n').filter(line => line.trim().length > 0).slice(0, 3);
+    } catch (e) {
+      console.error("AI Generation failed", e);
+      return ["Failed to generate questions. Please try again."];
+    }
+  },
+
+  async generateVerdict(candidateName: string, technicalScore: number, leadershipRatings: Record<string, string>): Promise<{ decision: 'Hire' | 'No Hire' | 'Review', confidence: number, rationale: string }> {
+    try {
+      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+      if (!apiKey) throw new Error("No API Key");
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const prompt = `
+        Act as a Hiring Manager. Evaluate this candidate:
+        Name: ${candidateName}
+        Technical Score: ${technicalScore.toFixed(2)}%
+        
+        Leadership Evidence:
+        ${Object.entries(leadershipRatings).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
+
+        Provide a hiring verdict in valid JSON format ONLY:
+        {
+          "decision": "Hire" | "No Hire" | "Review",
+          "confidence": <number 0-100>,
+          "rationale": "<short concise justification>"
+        }
+      `;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      let text = response.text();
+      // Cleanup markdown code blocks if present
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+      return JSON.parse(text);
+    } catch (e) {
+      console.error("Verdict Generation failed", e);
+      return { decision: 'Review', confidence: 0, rationale: "AI failed to generate verdict." };
+    }
+  },
+
+  async saveVerdict(evaluationId: string, verdict: any, existingNotes: Record<string, string>): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+
+    const updatedNotes = { ...existingNotes, '_AI_VERDICT': JSON.stringify(verdict) };
+
+    try {
+      const { error } = await sb.from('evaluations')
+        .update({ notes: updatedNotes })
+        .eq('id', evaluationId);
+      return !error;
+    } catch (e) {
+      console.error("Failed to save verdict", e);
+      return false;
+    }
   }
 };

@@ -71,6 +71,13 @@ export interface InterviewEvaluation {
   finalOutcome: EvaluationOutcome | null;
   finalComments: string;
   submittedAt: string;
+  aiVerdict?: AIVerdict;
+}
+
+export interface AIVerdict {
+  decision: 'Hire' | 'No Hire' | 'Review';
+  confidence: number;
+  rationale: string;
 }
 
 export interface AppState {
