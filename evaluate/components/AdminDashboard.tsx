@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section } from '../types';
+import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section, Organization, User, UserRole, Candidate } from '../types';
 import { LEADERSHIP_STANDARDS, OVERALL_TIME_LIMIT_SEC, QUESTION_TIME_LIMIT_SEC } from '../constants';
 import { SUPABASE_CONFIG } from '../config';
 import { AIQuestionGenerator } from './AIQuestionGenerator';
@@ -9,15 +9,36 @@ import { AIQuestionGenerator } from './AIQuestionGenerator';
 interface Props {
   onEvaluate: (candidate: { candidateName: string, candidateEmail: string }) => void;
   onLogout?: () => void;
+  currentUser?: User | null;
 }
 
-export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
+export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentUser }) => {
   const [results, setResults] = useState<ExamResult[]>([]);
   const [evaluations, setEvaluations] = useState<InterviewEvaluation[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [questionsLookup, setQuestionsLookup] = useState<Record<string, Question>>({});
   const [sections, setSections] = useState<Section[]>([]);
-  const [activeTab, setActiveTab] = useState<'leaderboard' | 'assessments' | 'questions' | 'config'>('leaderboard');
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [activeTab, setActiveTab] = useState<'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates'>('leaderboard');
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [newCandidateData, setNewCandidateData] = useState({ email: '', fullName: '' });
+  const [isAddingCandidate, setIsAddingCandidate] = useState(false);
+  const [newOrgData, setNewOrgData] = useState({ id: '', name: '', adminName: '', adminEmail: '' });
+  const [isAddingOrg, setIsAddingOrg] = useState(false);
+
+  const [isEditingOrg, setIsEditingOrg] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | undefined>(currentUser?.organizationId);
+
+  useEffect(() => {
+    if (currentUser?.organizationId && !selectedOrgId) {
+      setSelectedOrgId(currentUser.organizationId);
+    }
+  }, [currentUser]);
+
+  const [newUserData, setNewUserData] = useState<{ id: string, email: string, fullName: string, role: UserRole }>({ id: '', email: '', fullName: '', role: 'admin' });
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [isEditingUser, setIsEditingUser] = useState(false);
   const [loading, setLoading] = useState(false);
   const [infraStatus, setInfraStatus] = useState<{ connected: boolean, tables: Record<string, boolean> }>({
     connected: false,
@@ -52,7 +73,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
   const fetchQuestions = useCallback(async (page: number, size: number, cat: string, query: string) => {
     setLoading(true);
     try {
-      const { data, count } = await apiService.getQuestions(false, page, size, cat, query);
+      const { data, count } = await apiService.getQuestions(false, page, size, cat, query, selectedOrgId);
       setQuestions(data);
       setTotalQuestionsCount(count);
     } catch (err) {
@@ -60,12 +81,12 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedOrgId]);
 
   const fetchAllQuestionsForLookup = async () => {
     try {
       // Fetch a large chunk of questions to ensure results have data to link to
-      const { data } = await apiService.getQuestions(false, 1, 1000);
+      const { data } = await apiService.getQuestions(false, 1, 1000, '', '', selectedOrgId);
       const lookup: Record<string, Question> = {};
       data.forEach(q => { lookup[q.id] = q; });
       setQuestionsLookup(lookup);
@@ -79,22 +100,45 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     runDiagnostics();
     fetchSettings();
     fetchSections();
+    fetchOrganizations();
+    fetchUsers();
+    fetchCandidates();
     fetchAllQuestionsForLookup();
-  }, []);
+  }, [selectedOrgId]);
 
   useEffect(() => {
     if (activeTab === 'questions') {
       fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
     }
-  }, [activeTab, currentPage, pageSize, filterCategory, searchQuery, fetchQuestions]);
+  }, [activeTab, currentPage, pageSize, filterCategory, searchQuery, fetchQuestions, selectedOrgId]);
 
   const fetchSections = async () => {
-    const list = await apiService.getSections();
+    const list = await apiService.getSections(selectedOrgId);
     setSections(list);
   };
 
+  const fetchOrganizations = async () => {
+    const list = await apiService.getOrganizations();
+    setOrganizations(list);
+  };
+
+  const fetchUsers = async () => {
+    // For Super Admins, users are global/separate, so we fetch ALL (undefined orgId).
+    // For others, we scope to the selected/current organization.
+    const orgIdScope = currentUser?.role === 'super_admin' ? undefined : selectedOrgId;
+    const list = await apiService.getUsers(orgIdScope);
+    setUsers(list);
+  };
+
+  const fetchCandidates = async () => {
+    const list = await apiService.getCandidates(selectedOrgId);
+    setCandidates(list);
+  };
+
+
+
   const fetchSettings = async () => {
-    const settings = await apiService.getSettings();
+    const settings = await apiService.getSettings(selectedOrgId);
     if (settings) {
       setAssessmentSettings(settings);
     }
@@ -103,7 +147,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
   const handleUpdateSettings = async () => {
     setLoading(true);
     setSyncMessage({ text: "Syncing with cloud...", type: 'info' });
-    const success = await apiService.updateSettings(assessmentSettings);
+    const success = await apiService.updateSettings({ ...assessmentSettings, organizationId: selectedOrgId });
     setLoading(false);
     if (success) {
       setSyncMessage({ text: "Assessment parameters updated and saved to DB.", type: 'success' });
@@ -117,8 +161,8 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     setLoading(true);
     try {
       const [resData, evalData] = await Promise.all([
-        apiService.getAllResults(),
-        apiService.getAllEvaluations()
+        apiService.getAllResults(selectedOrgId),
+        apiService.getAllEvaluations(selectedOrgId)
       ]);
       setResults(resData || []);
       setEvaluations(evalData || []);
@@ -135,33 +179,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     return status;
   };
 
-  const handleSeedDb = async () => {
-    setSyncMessage({ text: "Checking infrastructure...", type: 'info' });
-    const status = await runDiagnostics();
 
-    if (!status.tables['questions']) {
-      setSyncMessage({ text: "Sync Blocked: Tables not found in Supabase.", type: 'error' });
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await apiService.initializeDatabase();
-      setSyncMessage({ text: "Question bank synced.", type: 'success' });
-      fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
-      fetchAllQuestionsForLookup();
-      fetchSections();
-    } catch (err: any) {
-      setSyncMessage({ text: "Sync failed: " + err.message, type: 'error' });
-    } finally {
-      setLoading(false);
-      setTimeout(() => setSyncMessage(null), 5000);
-    }
-  };
 
   const handleSaveQuestion = async (q: Question) => {
-    await apiService.saveSection({ name: q.category, isActive: true });
-    const success = await apiService.saveQuestion(q);
+    await apiService.saveSection({ name: q.category, isActive: true, organizationId: selectedOrgId });
+    const success = await apiService.saveQuestion({ ...q, organizationId: selectedOrgId });
     if (success) {
       setEditingQuestion(null);
       fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
@@ -180,8 +202,8 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     try {
       let successCount = 0;
       for (const q of newQs) {
-        await apiService.saveSection({ name: q.category, isActive: true });
-        const ok = await apiService.saveQuestion(q);
+        await apiService.saveSection({ name: q.category, isActive: true, organizationId: selectedOrgId });
+        const ok = await apiService.saveQuestion({ ...q, organizationId: selectedOrgId });
         if (ok) successCount++;
       }
       setSyncMessage({ text: `${successCount} AI questions imported successfully.`, type: 'success' });
@@ -257,7 +279,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
     if (!trimmed) return;
 
     setLoading(true);
-    const ok = await apiService.saveSection({ name: trimmed, isActive: true });
+    const ok = await apiService.saveSection({ name: trimmed, isActive: true, organizationId: selectedOrgId });
     setLoading(false);
 
     if (ok) {
@@ -268,6 +290,170 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
       setSyncMessage({ text: `Domain "${trimmed}" initialized.`, type: 'success' });
     } else {
       setSyncMessage({ text: "Failed to create section. Check DB permissions.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleEditOrganization = async () => {
+    if (!newOrgData.adminName || !newOrgData.adminEmail) {
+      alert("Please fill all fields.");
+      return;
+    }
+    setLoading(true);
+    const success = await apiService.updateOrganization({
+      id: newOrgData.id,
+      name: newOrgData.name, // Name shouldn't change usually but keeping it for completeness if needed, though API ignores it mostly
+      adminName: newOrgData.adminName,
+      adminEmail: newOrgData.adminEmail
+    });
+    setLoading(false);
+
+    if (success) {
+      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+      setIsEditingOrg(false);
+      setIsAddingOrg(false);
+      fetchOrganizations();
+      setSyncMessage({ text: "Organization updated successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to update organization.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleDeleteOrganization = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this organization? This action cannot be undone.")) return;
+    setLoading(true);
+    const success = await apiService.deleteOrganization(id);
+    setLoading(false);
+
+    if (success) {
+      fetchOrganizations();
+      setSyncMessage({ text: "Organization deleted.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to delete organization.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleAddOrganization = async () => {
+    if (!newOrgData.name || !newOrgData.adminName || !newOrgData.adminEmail) {
+      alert("Please fill all fields for the organization.");
+      return;
+    }
+
+    setLoading(true);
+    const success = await apiService.addOrganization(newOrgData.name, newOrgData.adminName, newOrgData.adminEmail);
+    setLoading(false);
+
+    if (success) {
+      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+      setIsAddingOrg(false);
+      fetchOrganizations();
+      setSyncMessage({ text: "Organization added successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to add organization. Name might be duplicate.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleAddUser = async () => {
+    if (!newUserData.email || !newUserData.fullName) {
+      alert("Please fill all fields.");
+      return;
+    }
+    setLoading(true);
+    const success = await apiService.addUser({
+      email: newUserData.email,
+      fullName: newUserData.fullName,
+      role: newUserData.role,
+      organizationId: selectedOrgId
+    });
+    setLoading(false);
+
+    if (success) {
+      setNewUserData({ id: '', email: '', fullName: '', role: 'admin' });
+      setIsAddingUser(false);
+      fetchUsers();
+      setSyncMessage({ text: "User added successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to add user.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleEditUser = async () => {
+    if (!newUserData.email || !newUserData.fullName) {
+      alert("Please fill all fields.");
+      return;
+    }
+    setLoading(true);
+    const success = await apiService.updateUser({
+      id: newUserData.id,
+      email: newUserData.email,
+      fullName: newUserData.fullName,
+      role: newUserData.role
+    });
+    setLoading(false);
+
+    if (success) {
+      setNewUserData({ id: '', email: '', fullName: '', role: 'admin' });
+      setIsEditingUser(false);
+      setIsAddingUser(false);
+      fetchUsers();
+      setSyncMessage({ text: "User updated successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to update user.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this user?")) return;
+    setLoading(true);
+    const success = await apiService.deleteUser(id);
+    setLoading(false);
+    if (success) {
+      fetchUsers();
+      setSyncMessage({ text: "User deleted.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to delete user.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleAddCandidate = async () => {
+    if (!newCandidateData.email || !newCandidateData.fullName) {
+      alert("Please fill all fields.");
+      return;
+    }
+    setLoading(true);
+    const success = await apiService.addCandidate({
+      email: newCandidateData.email,
+      fullName: newCandidateData.fullName,
+      organizationId: selectedOrgId
+    });
+    setLoading(false);
+    if (success) {
+      setNewCandidateData({ email: '', fullName: '' });
+      setIsAddingCandidate(false);
+      fetchCandidates();
+      setSyncMessage({ text: "Candidate added successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to add candidate.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleDeleteCandidate = async (id: string) => {
+    if (!window.confirm("Delete this candidate?")) return;
+    setLoading(true);
+    const success = await apiService.deleteCandidate(id);
+    setLoading(false);
+    if (success) {
+      fetchCandidates();
+      setSyncMessage({ text: "Candidate deleted.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to delete candidate.", type: 'error' });
     }
     setTimeout(() => setSyncMessage(null), 3000);
   };
@@ -816,6 +1002,42 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
         </div>
       )}
 
+      {isAddingCandidate && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-slate-900 mb-6 uppercase tracking-tight">Register Candidate</h3>
+            <div className="space-y-4">
+              <input
+                placeholder="Full Name"
+                value={newCandidateData.fullName}
+                onChange={e => setNewCandidateData({ ...newCandidateData, fullName: e.target.value })}
+                className="w-full p-4 bg-white border border-slate-200 rounded-2xl outline-none shadow-sm focus:ring-4 focus:ring-slate-100 transition-all font-medium"
+              />
+              <input
+                placeholder="Email Address"
+                value={newCandidateData.email}
+                onChange={e => setNewCandidateData({ ...newCandidateData, email: e.target.value })}
+                className="w-full p-4 bg-white border border-slate-200 rounded-2xl outline-none shadow-sm focus:ring-4 focus:ring-slate-100 transition-all font-medium"
+              />
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => setIsAddingCandidate(false)}
+                  className="flex-1 py-4 text-slate-400 font-black uppercase text-[10px] tracking-widest hover:text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddCandidate}
+                  className="flex-1 bg-[#002b49] text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  Register
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editingQuestion && (
         <QuestionModal
           question={editingQuestion}
@@ -836,6 +1058,21 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
         <div>
           <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Recruitment Hub</h1>
           <p className="text-[#002b49] font-bold uppercase tracking-[0.2em] text-[10px] mt-2">Central Data Architecture & Quality Control</p>
+          {currentUser?.role === 'super_admin' && (
+            <div className="mt-4 flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Context:</span>
+              <select
+                value={selectedOrgId || ''}
+                onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 py-1 px-3 outline-none focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">Select Organization</option>
+                {organizations.map(org => (
+                  <option key={org.id} value={org.id}>{org.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex gap-4">
           {activeTab === 'questions' && (
@@ -863,7 +1100,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
       </div>
 
       <div className="flex border-b border-slate-200 mb-10 gap-8 overflow-x-auto no-scrollbar">
-        {(['leaderboard', 'assessments', 'questions', 'config'] as const).map(tab => (
+        {(['leaderboard', 'assessments', 'questions', 'config', 'candidates'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -873,7 +1110,18 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
             className={`px-2 py-4 font-black text-[10px] uppercase tracking-[0.2em] transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#002b49] text-[#002b49]' : 'border-transparent text-slate-300 hover:text-slate-400'
               }`}
           >
-            {tab === 'questions' ? '📋 Question Bank' : tab === 'assessments' ? '⭐ Toolkits' : tab}
+            {tab === 'questions' ? '📋 Question Bank' : tab === 'assessments' ? '⭐ Toolkits' : tab === 'candidates' ? '👥 Candidates' : tab}
+          </button>
+        ))}
+
+        {currentUser?.role === 'super_admin' && (['organizations', 'users'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-2 py-4 font-black text-[10px] uppercase tracking-[0.2em] transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#002b49] text-[#002b49]' : 'border-transparent text-slate-300 hover:text-slate-400'
+              }`}
+          >
+            {tab === 'organizations' ? '🏢 Organizations' : '👥 Users'}
           </button>
         ))}
       </div>
@@ -901,25 +1149,25 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
                   <table className="w-full text-left min-w-[1000px]">
                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <tr>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Rank</th>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Candidate Profile</th>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Score</th>
+                        <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Rank</th>
+                        <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Candidate Profile</th>
+                        <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest text-center">Score</th>
                         <th className="px-10 py-5"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {sortedResults.map((r, i) => (
                         <tr key={r.attemptId} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="px-10 py-8 font-black text-slate-200 text-5xl italic tracking-tighter">#{i + 1}</td>
+                          <td className="px-10 py-8 font-black text-slate-200 text-4xl italic tracking-tighter">#{i + 1}</td>
                           <td className="px-10 py-8">
-                            <div className="font-black text-slate-900 text-2xl tracking-tight leading-none mb-1">{r.candidateName}</div>
-                            <div className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">{r.candidateEmail}</div>
+                            <div className="font-black text-slate-900 text-xl tracking-tight leading-none mb-1">{r.candidateName}</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{r.candidateEmail}</div>
                           </td>
                           <td className="px-10 py-8 text-center">
-                            <span className="text-3xl font-black text-[#002b49] tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
+                            <span className="text-2xl font-black text-[#002b49] tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
                           </td>
                           <td className="px-10 py-8 text-right flex items-center justify-end gap-3">
-                            <button onClick={() => setSelectedProfile(r)} className="bg-[#002b49] text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95">View Analytics</button>
+                            <button onClick={() => setSelectedProfile(r)} className="bg-[#002b49] text-white px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95">View Analytics</button>
                             <button
                               onClick={() => handleDeleteResult(r.attemptId)}
                               className="p-4 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-all shadow-sm"
@@ -948,11 +1196,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
               <div className="bg-[#002b49] rounded-[48px] p-12 flex flex-col items-center justify-center text-center border-4 border-[#d4af37] shadow-2xl hover:scale-[1.03] transition-all min-h-[400px]">
                 <div className="w-20 h-20 bg-[#d4af37] text-[#002b49] rounded-[32px] flex items-center justify-center text-4xl font-black mb-8 shadow-xl shadow-[#d4af37]/20">+</div>
-                <h3 className="text-white font-black uppercase tracking-widest text-lg mb-3">Direct Entry</h3>
-                <p className="text-white/40 text-[10px] mb-10 font-bold uppercase tracking-[0.2em] leading-relaxed max-w-[200px]">Manual leadership evaluation for walk-in candidates</p>
+                <h3 className="text-white font-black uppercase tracking-widest text-base mb-3">Direct Entry</h3>
+                <p className="text-white/40 text-[9px] mb-10 font-bold uppercase tracking-[0.2em] leading-relaxed max-w-[200px]">Manual leadership evaluation for walk-in candidates</p>
                 <button
                   onClick={() => setShowManualModal(true)}
-                  className="w-full bg-white text-[#002b49] py-5 rounded-3xl font-black uppercase text-[11px] tracking-widest hover:shadow-2xl transition-all"
+                  className="w-full bg-white text-[#002b49] py-5 rounded-3xl font-black uppercase text-[10px] tracking-widest hover:shadow-2xl transition-all"
                 >
                   Launch manual tool
                 </button>
@@ -961,26 +1209,26 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
               {results.map(r => {
                 const isDone = evaluations.find(e => e.candidateEmail === r.candidateEmail);
                 return (
-                  <div key={r.attemptId} className="bg-white rounded-[48px] p-12 border border-slate-100 shadow-xl flex flex-col justify-between hover:shadow-2xl transition-all group">
+                  <div key={r.attemptId} className="bg-white rounded-[48px] p-10 border border-slate-100 shadow-xl flex flex-col justify-between hover:shadow-2xl transition-all group">
                     <div>
-                      <div className="text-[10px] font-black uppercase text-indigo-600 mb-8 flex justify-between items-center bg-indigo-50/50 px-4 py-2 rounded-full">
+                      <div className="text-[9px] font-black uppercase text-indigo-600 mb-6 flex justify-between items-center bg-indigo-50/50 px-4 py-2 rounded-full">
                         <span className="tracking-widest">CAPABILITY STATUS</span>
                         {isDone ? (
-                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full font-black text-[9px]">EVALUATED</span>
+                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full font-black text-[8px]">EVALUATED</span>
                         ) : (
-                          <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-black text-[9px]">PENDING</span>
+                          <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-black text-[8px]">PENDING</span>
                         )}
                       </div>
-                      <div className="text-3xl font-black text-slate-900 mb-2 leading-none tracking-tighter group-hover:text-[#002b49] transition-colors">{r.candidateName}</div>
-                      <div className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mb-10 truncate">{r.candidateEmail}</div>
+                      <div className="text-2xl font-black text-slate-900 mb-2 leading-none tracking-tighter group-hover:text-[#002b49] transition-colors">{r.candidateName}</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-8 truncate">{r.candidateEmail}</div>
                       <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center mb-10 border border-slate-100 shadow-inner overflow-hidden">
-                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest whitespace-nowrap mr-2">Technical score</span>
-                        <span className="text-xl font-black text-slate-900 tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
+                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest whitespace-nowrap mr-2">Technical score</span>
+                        <span className="text-lg font-black text-slate-900 tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
                       </div>
                     </div>
                     <button
                       onClick={() => onEvaluate({ candidateName: r.candidateName, candidateEmail: r.candidateEmail })}
-                      className={`w-full py-6 rounded-3xl font-black uppercase text-[11px] tracking-widest transition-all ${isDone ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' : 'bg-[#002b49] text-[#d4af37] shadow-xl hover:bg-[#002b49]/90'
+                      className={`w-full py-5 rounded-3xl font-black uppercase text-[10px] tracking-widest transition-all ${isDone ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' : 'bg-[#002b49] text-[#d4af37] shadow-xl hover:bg-[#002b49]/90'
                         }`}
                     >
                       {isDone ? 'Review capability' : 'Conduct Assessment'}
@@ -1035,45 +1283,45 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
                   {questions.length > 0 ? (
                     <>
                       {questions.map(q => (
-                        <div key={q.id} className={`bg-white rounded-[40px] p-12 border border-slate-100 shadow-xl flex flex-col gap-10 hover:shadow-2xl transition-all ${!q.isActive ? 'opacity-40' : ''}`}>
-                          <div className="flex flex-col lg:flex-row justify-between items-start gap-8">
+                        <div key={q.id} className={`bg-white rounded-[32px] p-6 border border-slate-100 shadow-xl flex flex-col gap-6 hover:shadow-2xl transition-all ${!q.isActive ? 'opacity-40' : ''}`}>
+                          <div className="flex flex-col lg:flex-row justify-between items-start gap-6">
                             <div className="flex-1">
-                              <div className="flex flex-wrap items-center gap-4 mb-6">
-                                <span className="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest mb-2 border border-indigo-100">{q.category}</span>
-                                <span className="bg-slate-50 text-slate-500 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest mb-2 border border-slate-100">{q.difficulty}</span>
-                                {!q.isActive && <span className="bg-red-50 text-red-600 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest mb-2 border border-red-100">Hidden from bank</span>}
+                              <div className="flex flex-wrap items-center gap-3 mb-3">
+                                <span className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border border-indigo-100">{q.category}</span>
+                                <span className="bg-slate-50 text-slate-500 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border border-slate-100">{q.difficulty}</span>
+                                {!q.isActive && <span className="bg-red-50 text-red-600 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border border-red-100">Hidden from bank</span>}
                               </div>
-                              <p className="text-2xl font-bold text-slate-900 leading-snug tracking-tight mb-10">{q.text}</p>
+                              <p className="text-sm font-bold text-slate-900 leading-relaxed tracking-tight mb-6">{q.text}</p>
 
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {(['A', 'B', 'C', 'D'] as OptionKey[]).map((key) => {
                                   const isCorrect = q.correctOption === key;
                                   return (
                                     <div
                                       key={key}
-                                      className={`flex items-center p-5 rounded-3xl border-2 transition-all ${isCorrect
+                                      className={`flex items-center p-3 rounded-2xl border-2 transition-all ${isCorrect
                                         ? 'bg-green-50 border-green-200 text-green-900 shadow-sm'
                                         : 'bg-white border-slate-50 text-slate-500'
                                         }`}
                                     >
-                                      <div className={`w-10 h-10 flex items-center justify-center rounded-xl font-black text-sm mr-4 shrink-0 shadow-sm ${isCorrect ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-400'
+                                      <div className={`w-6 h-6 flex items-center justify-center rounded-lg font-black text-[10px] mr-3 shrink-0 shadow-sm ${isCorrect ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-400'
                                         }`}>
                                         {key}
                                       </div>
-                                      <span className="text-sm font-semibold">{q.options[key]}</span>
+                                      <span className="text-[10px] font-semibold leading-snug">{q.options[key]}</span>
                                     </div>
                                   );
                                 })}
                               </div>
                             </div>
-                            <div className="flex lg:flex-col gap-3 shrink-0 pt-4">
+                            <div className="flex lg:flex-col gap-2 shrink-0 pt-1">
                               <button
                                 onClick={() => setEditingQuestion(q)}
-                                className="px-10 py-4 bg-[#002b49] text-[#d4af37] rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95"
+                                className="px-6 py-2 bg-[#002b49] text-[#d4af37] rounded-xl text-[8px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95"
                               >Update</button>
                               <button
                                 onClick={() => handleDeleteQuestion(q.id)}
-                                className="px-10 py-4 bg-red-50 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all"
+                                className="px-6 py-2 bg-red-50 text-red-600 rounded-xl text-[8px] font-black uppercase tracking-widest hover:bg-red-100 transition-all"
                               >Delete</button>
                             </div>
                           </div>
@@ -1085,12 +1333,299 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
                     </>
                   ) : (
                     <div className="py-32 text-center bg-white rounded-[48px] border-2 border-dashed border-slate-100 shadow-inner">
-                      <p className="text-slate-300 font-black uppercase text-[11px] tracking-[0.5em] mb-12">No matching questions found</p>
-                      <button onClick={handleSeedDb} className="bg-[#002b49] text-white px-12 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-2xl">Restore Seed Data</button>
+                      <p className="text-slate-300 font-black uppercase text-[11px] tracking-[0.5em] mb-4">No matching questions found</p>
+                      <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Use AI Architect or Manual Add to create question bank</p>
                     </div>
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'candidates' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Registered Candidates</h3>
+                <button
+                  onClick={() => setIsAddingCandidate(true)}
+                  className="bg-[#002b49] text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+                >
+                  + Register Candidate
+                </button>
+              </div>
+
+              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th className="px-8 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Name</th>
+                      <th className="px-8 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Email</th>
+                      <th className="px-8 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                      <th className="px-8 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Added</th>
+                      <th className="px-8 py-5 text-right"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {candidates.map(c => (
+                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-8 py-5 font-bold text-sm text-slate-700">{c.fullName}</td>
+                        <td className="px-8 py-5 font-medium text-xs text-slate-500">{c.email}</td>
+                        <td className="px-8 py-5">
+                          <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-[8px] font-black uppercase tracking-wide border border-green-100">{c.status}</span>
+                        </td>
+                        <td className="px-8 py-5 text-[10px] text-slate-400">
+                          {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
+                        </td>
+                        <td className="px-8 py-5 text-right">
+                          <button
+                            onClick={() => handleDeleteCandidate(c.id)}
+                            className="text-red-400 hover:text-red-600 transition-colors"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {candidates.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-24 text-center text-slate-300">
+                          <div className="flex flex-col items-center gap-3">
+                            <span className="text-2xl">👥</span>
+                            <span className="font-bold uppercase text-xs tracking-widest">No candidates found</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'organizations' && (
+            <div className="grid grid-cols-1 gap-10">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-3xl font-black text-[#002b49] uppercase tracking-tighter mb-2 leading-none">Organization Registry</h3>
+                  <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.3em]">Manage partner entities and administrators</p>
+                </div>
+                <button onClick={() => {
+                  setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+                  setIsAddingOrg(true);
+                  setIsEditingOrg(false);
+                }} className="bg-[#002b49] text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                  + Add Entity
+                </button>
+              </div>
+
+              {isAddingOrg && (
+                <div className="bg-indigo-50 p-8 rounded-[32px] border-2 border-indigo-100 shadow-lg animate-in fade-in slide-in-from-top-4">
+                  <h4 className="text-[10px] font-black text-indigo-800 uppercase tracking-widest mb-6">{isEditingOrg ? 'Edit Organization Profile' : 'New Organization Profile'}</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Organization Name</label>
+                      <input
+                        value={newOrgData.name}
+                        onChange={e => setNewOrgData(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="e.g. Acme Corp"
+                        className={`w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100 ${isEditingOrg ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        disabled={isEditingOrg}
+                      />
+                      <p className="text-[8px] text-indigo-400 mt-2 font-bold px-1">* Saved as lowercase</p>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Admin Name</label>
+                      <input
+                        value={newOrgData.adminName}
+                        onChange={e => setNewOrgData(prev => ({ ...prev, adminName: e.target.value }))}
+                        placeholder="Full Name"
+                        className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Admin Email</label>
+                      <input
+                        value={newOrgData.adminEmail}
+                        onChange={e => setNewOrgData(prev => ({ ...prev, adminEmail: e.target.value }))}
+                        placeholder="admin@company.com"
+                        type="email"
+                        className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-4">
+                    <button onClick={() => { setIsAddingOrg(false); setIsEditingOrg(false); }} className="px-8 py-3 text-indigo-400 font-black uppercase text-[10px] tracking-widest hover:text-indigo-600 transition-colors">Cancel</button>
+                    <button onClick={isEditingOrg ? handleEditOrganization : handleAddOrganization} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-indigo-700 transition-all">
+                      {isEditingOrg ? 'Update Profile' : 'Create Profile'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {organizations.map(org => (
+                  <div key={org.id} className="bg-white p-8 rounded-[32px] border border-slate-100 shadow-lg hover:shadow-xl transition-all group">
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-slate-50 text-slate-300 rounded-2xl flex items-center justify-center text-lg font-black uppercase group-hover:bg-[#002b49] group-hover:text-[#d4af37] transition-colors duration-500">
+                          {org.name.substring(0, 2)}
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-black text-slate-900 capitalize mb-1">{org.name}</h4>
+                          <span className="bg-slate-50 text-slate-400 px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border border-slate-100">{org.createdAt ? new Date(org.createdAt).toLocaleDateString() : 'N/A'}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => {
+                            setNewOrgData({ id: org.id, name: org.name, adminName: org.adminName, adminEmail: org.adminEmail });
+                            setIsEditingOrg(true);
+                            setIsAddingOrg(true);
+                          }}
+                          className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOrganization(org.id)}
+                          className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Delete">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-50">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 text-[10px] font-black">
+                          {org.adminName.substring(0, 1)}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-700">{org.adminName}</p>
+                          <p className="text-[9px] font-medium text-slate-400">{org.adminEmail}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {organizations.length === 0 && !isAddingOrg && (
+                  <div className="col-span-full py-24 text-center border-2 border-dashed border-slate-100 rounded-[32px]">
+                    <p className="text-slate-300 font-black uppercase text-[11px] tracking-[0.4em]">No organizations registered</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'users' && (
+            <div className="grid grid-cols-1 gap-10">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-3xl font-black text-[#002b49] uppercase tracking-tighter mb-2 leading-none">User Management</h3>
+                  <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.3em]">Manage access and roles</p>
+                </div>
+                <button onClick={() => {
+                  setNewUserData({ id: '', email: '', fullName: '', role: 'admin' });
+                  setIsAddingUser(true);
+                  setIsEditingUser(false);
+                }} className="bg-[#002b49] text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                  + Add User
+                </button>
+              </div>
+
+              {isAddingUser && (
+                <div className="bg-indigo-50 p-8 rounded-[32px] border-2 border-indigo-100 shadow-lg animate-in fade-in slide-in-from-top-4">
+                  <h4 className="text-[10px] font-black text-indigo-800 uppercase tracking-widest mb-6">{isEditingUser ? 'Edit User' : 'New User'}</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Full Name</label>
+                      <input
+                        value={newUserData.fullName}
+                        onChange={e => setNewUserData(prev => ({ ...prev, fullName: e.target.value }))}
+                        placeholder="John Doe"
+                        className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Email Address</label>
+                      <input
+                        value={newUserData.email}
+                        onChange={e => setNewUserData(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="john@example.com"
+                        type="email"
+                        className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Role</label>
+                      <select
+                        value={newUserData.role}
+                        onChange={e => setNewUserData(prev => ({ ...prev, role: e.target.value as UserRole }))}
+                        className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100 appearance-none"
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-4">
+                    <button onClick={() => { setIsAddingUser(false); setIsEditingUser(false); }} className="px-8 py-3 text-indigo-400 font-black uppercase text-[10px] tracking-widest hover:text-indigo-600 transition-colors">Cancel</button>
+                    <button onClick={isEditingUser ? handleEditUser : handleAddUser} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-indigo-700 transition-all">
+                      {isEditingUser ? 'Update User' : 'Create User'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white rounded-[32px] border border-slate-100 shadow-xl overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th className="p-6 text-[8px] font-black uppercase text-slate-400 tracking-widest">Name</th>
+                      <th className="p-6 text-[8px] font-black uppercase text-slate-400 tracking-widest">Email</th>
+                      <th className="p-6 text-[8px] font-black uppercase text-slate-400 tracking-widest">Role</th>
+                      <th className="p-6 text-[8px] font-black uppercase text-slate-400 tracking-widest text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map(user => (
+                      <tr key={user.id} className="group hover:bg-slate-50/50 transition-colors">
+                        <td className="p-6 font-bold text-sm text-slate-700">{user.fullName}</td>
+                        <td className="p-6 font-medium text-xs text-slate-500">{user.email}</td>
+                        <td className="p-6">
+                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border ${user.role === 'super_admin'
+                            ? 'bg-purple-50 text-purple-600 border-purple-100'
+                            : 'bg-blue-50 text-blue-600 border-blue-100'
+                            }`}>
+                            {user.role.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="p-6 text-right">
+                          <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => {
+                                setNewUserData({ id: user.id, email: user.email, fullName: user.fullName, role: user.role });
+                                setIsEditingUser(true);
+                                setIsAddingUser(true);
+                              }}
+                              className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUser(user.id)}
+                              className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Delete">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {users.length === 0 && !isAddingUser && (
+                      <tr>
+                        <td colSpan={4} className="p-12 text-center text-slate-300 font-black uppercase text-[11px] tracking-[0.4em]">No users found</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -1195,52 +1730,93 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout }) => {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="bg-[#002b49] rounded-[48px] p-12 shadow-2xl border border-white/5 mt-10">
-                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2 leading-none">Infrastructure</h3>
-                <p className="text-white/40 text-[11px] font-bold uppercase tracking-[0.3em] mb-12">Cloud synchronization & health</p>
+          {currentUser?.role === 'super_admin' && activeTab === 'config' && (
+            <div className="bg-[#002b49] rounded-[48px] p-12 shadow-2xl border border-white/5 mt-10">
+              <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2 leading-none">Infrastructure</h3>
+              <p className="text-white/40 text-[11px] font-bold uppercase tracking-[0.3em] mb-12">Cloud synchronization & health</p>
 
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center p-6 bg-white/5 border border-white/10 rounded-3xl">
-                    <span className="text-[10px] font-black uppercase text-white/40 tracking-widest">Global connection</span>
-                    <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${infraStatus.connected ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                      {infraStatus.connected ? 'ONLINE' : 'DISCONNECTED'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {['questions', 'results', 'evaluations', 'settings', 'sections'].map(table => (
-                      <div key={table} className="flex justify-between items-center p-6 bg-white rounded-3xl shadow-lg border-b-4 border-slate-100">
-                        <span className="text-[11px] font-black uppercase text-slate-800 tracking-widest">{table} collection</span>
-                        <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${infraStatus.tables[table] ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                          {infraStatus.tables[table] ? 'VERIFIED' : 'NOT FOUND'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {!Object.values(infraStatus.tables).every(v => v) && (
-                    <div className="mt-8 pt-10 border-t border-white/5">
-                      <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest mb-6 text-center">Protocol deviation detected: Table schema required.</p>
-                      <p className="text-[9px] text-white/40 font-bold uppercase mb-6 text-center">If "settings" or other tables are "NOT FOUND", please execute the SQL script in your Supabase SQL Editor.</p>
-                      <button
-                        onClick={() => {
-                          const sql = `CREATE TABLE IF NOT EXISTS sections (name TEXT PRIMARY KEY, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, category TEXT REFERENCES sections(name) ON UPDATE CASCADE, difficulty TEXT, text TEXT, options JSONB, correct_option CHAR(1), is_active BOOLEAN, created_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, candidate_name TEXT, candidate_email TEXT, started_at TIMESTAMPTZ, submitted_at TIMESTAMPTZ, total_time_taken_sec INTEGER, total_questions INTEGER, attempted_count INTEGER, missed_count INTEGER, correct_count INTEGER, wrong_count INTEGER, avg_time_per_answered_sec DECIMAL, score_percent DECIMAL, answers_json JSONB, created_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, candidate_email TEXT, interviewer_name TEXT, level TEXT, ratings JSONB, notes JSONB, final_outcome TEXT, final_comments TEXT, submitted_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value JSONB, updated_at TIMESTAMPTZ DEFAULT NOW()); ALTER TABLE sections DISABLE ROW LEVEL SECURITY; ALTER TABLE questions DISABLE ROW LEVEL SECURITY; ALTER TABLE results DISABLE ROW LEVEL SECURITY; ALTER TABLE evaluations DISABLE ROW LEVEL SECURITY; ALTER TABLE settings DISABLE ROW LEVEL SECURITY;`;
-                          navigator.clipboard.writeText(sql);
-                          setSyncMessage({ text: "Database Schema captured to clipboard.", type: 'success' });
-                        }}
-                        className="w-full bg-[#d4af37] text-[#002b49] py-5 rounded-3xl font-black uppercase text-[11px] tracking-widest shadow-2xl hover:bg-amber-400 transition-all"
-                      >
-                        Copy SQL Initialization Script
-                      </button>
-                    </div>
-                  )}
-
-                  <button onClick={() => runDiagnostics()} className="w-full text-white/20 hover:text-white font-black uppercase text-[9px] tracking-[0.4em] transition-all mt-6 text-center underline">RE-RUN INFRASTRUCTURE DIAGNOSTICS</button>
+              <div className="space-y-6">
+                <div className="flex justify-between items-center p-6 bg-white/5 border border-white/10 rounded-3xl">
+                  <span className="text-[10px] font-black uppercase text-white/40 tracking-widest">Global connection</span>
+                  <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${infraStatus.connected ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    {infraStatus.connected ? 'ONLINE' : 'DISCONNECTED'}
+                  </span>
                 </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {['questions', 'results', 'evaluations', 'settings', 'sections', 'organizations', 'users'].map(table => (
+                    <div key={table} className="flex justify-between items-center p-6 bg-white rounded-3xl shadow-lg border-b-4 border-slate-100">
+                      <span className="text-[11px] font-black uppercase text-slate-800 tracking-widest">{table} collection</span>
+                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${infraStatus.tables[table] ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                        {infraStatus.tables[table] ? 'VERIFIED' : 'NOT FOUND'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {!Object.values(infraStatus.tables).every(v => v) && (
+                  <div className="mt-8 pt-10 border-t border-white/5">
+                    <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest mb-6 text-center">Protocol deviation detected: Table schema required.</p>
+                    <p className="text-[9px] text-white/40 font-bold uppercase mb-6 text-center">If "settings" or other tables are "NOT FOUND", please execute the SQL script in your Supabase SQL Editor.</p>
+                    <button
+                      onClick={() => {
+                        const sql = `
+-- Disable Row Level Security (RLS)
+ALTER TABLE sections DISABLE ROW LEVEL SECURITY;
+ALTER TABLE questions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE results DISABLE ROW LEVEL SECURITY;
+ALTER TABLE evaluations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE organizations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+
+-- MIGRATION: Multi-tenancy Support
+INSERT INTO organizations (id, name, admin_name, admin_email)
+VALUES ('a956050a-8eb5-44e0-8725-24269181038c', 'Default Organization', 'System Admin', 'admin@default.com')
+ON CONFLICT (id) DO NOTHING;
+
+-- Create Tables with organization_id support
+CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, admin_name TEXT, admin_email TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
+
+CREATE TABLE IF NOT EXISTS sections (name TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (name, organization_id));
+
+CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, section_name TEXT NOT NULL, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', difficulty TEXT NOT NULL, text TEXT NOT NULL, options JSONB NOT NULL, correct_option CHAR(1) NOT NULL, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), FOREIGN KEY (section_name, organization_id) REFERENCES sections(name, organization_id) ON UPDATE CASCADE);
+
+CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', candidate_name TEXT NOT NULL, candidate_email TEXT NOT NULL, started_at TIMESTAMPTZ NOT NULL, submitted_at TIMESTAMPTZ NOT NULL, total_time_taken_sec INTEGER NOT NULL, total_questions INTEGER NOT NULL, attempted_count INTEGER NOT NULL, missed_count INTEGER NOT NULL, correct_count INTEGER NOT NULL, wrong_count INTEGER NOT NULL, avg_time_per_answered_sec DECIMAL NOT NULL, score_percent DECIMAL NOT NULL, answers_json JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+
+CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', candidate_email TEXT NOT NULL, interviewer_name TEXT NOT NULL, level TEXT NOT NULL, ratings JSONB NOT NULL, notes JSONB NOT NULL, final_outcome TEXT NOT NULL, final_comments TEXT, submitted_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+
+CREATE TABLE IF NOT EXISTS settings (key TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', value JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (key, organization_id));
+
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY DEFAULT gen_random_uuid(), organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', email TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, role TEXT CHECK (role IN ('super_admin', 'admin')) NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+
+-- Migration for existing tables (Idempotent)
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'organization_id') THEN ALTER TABLE users ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE users SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sections' AND column_name = 'organization_id') THEN ALTER TABLE sections ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE sections SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; ALTER TABLE sections DROP CONSTRAINT sections_pkey CASCADE; ALTER TABLE sections ADD PRIMARY KEY (name, organization_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'questions' AND column_name = 'organization_id') THEN ALTER TABLE questions ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE questions SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'results' AND column_name = 'organization_id') THEN ALTER TABLE results ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE results SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'evaluations' AND column_name = 'organization_id') THEN ALTER TABLE evaluations ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE evaluations SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'settings' AND column_name = 'organization_id') THEN ALTER TABLE settings ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE settings SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; ALTER TABLE settings DROP CONSTRAINT settings_pkey CASCADE; ALTER TABLE settings ADD PRIMARY KEY (key, organization_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_admin_email_key') THEN ALTER TABLE organizations ADD CONSTRAINT organizations_admin_email_key UNIQUE (admin_email); END IF; END $$;
+`;
+                        navigator.clipboard.writeText(sql);
+                        setSyncMessage({ text: "Database Schema captured to clipboard.", type: 'success' });
+                      }}
+                      className="w-full bg-[#d4af37] text-[#002b49] py-5 rounded-3xl font-black uppercase text-[11px] tracking-widest shadow-2xl hover:bg-amber-400 transition-all"
+                    >
+                      Copy SQL Initialization Script
+                    </button>
+                  </div>
+                )}
+
+                <button onClick={() => runDiagnostics()} className="w-full text-white/20 hover:text-white font-black uppercase text-[9px] tracking-[0.4em] transition-all mt-6 text-center underline">RE-RUN INFRASTRUCTURE DIAGNOSTICS</button>
               </div>
             </div>
           )}
+
         </div>
       )}
     </div>

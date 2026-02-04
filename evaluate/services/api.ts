@@ -1,8 +1,7 @@
 
 import { createClient, SupabaseClient, Session } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Question, ExamResult, InterviewEvaluation, AssessmentSettings, Section } from '../types';
-import { SEED_QUESTIONS } from '../constants';
+import { Question, ExamResult, InterviewEvaluation, AssessmentSettings, Section, Organization, User, UserRole, Candidate } from '../types';
 import { SUPABASE_CONFIG } from '../config';
 
 let supabaseInstance: SupabaseClient | null = null;
@@ -59,16 +58,54 @@ export const apiService = {
     return session;
   },
 
-  async getSections(): Promise<Section[]> {
+  async getUserProfile(email: string): Promise<User | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+
+    // 1. Get User Role & Basic Info
+    const { data: userData, error: userError } = await sb
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (userError || !userData) return null;
+
+    // 2. Resolve Organization ID via admin_email match (Priority Source)
+    // This ensures that if the user is listed as an admin in the organizations table, 
+    // we use THAT organization's ID, keeping them strictly bound to their owned org.
+    const { data: orgData } = await sb
+      .from('organizations')
+      .select('id')
+      .eq('admin_email', email.toLowerCase())
+      .single();
+
+    return {
+      id: userData.id,
+      email: userData.email,
+      fullName: userData.full_name,
+      role: userData.role as UserRole,
+      createdAt: userData.created_at,
+      organizationId: orgData?.id || userData.organization_id // Prefer direct admin linkage
+    };
+  },
+
+  async getSections(organizationId?: string): Promise<Section[]> {
     const sb = getSupabase();
     if (!sb) return [];
     try {
-      const { data, error } = await sb.from('sections').select('*').order('name');
+      let query = sb.from('sections').select('*').order('name');
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []).map(s => ({
         name: s.name,
         isActive: s.is_active,
-        createdAt: s.created_at
+        createdAt: s.created_at,
+        organizationId: s.organization_id
       }));
     } catch (err) {
       console.error("Failed to fetch sections", err);
@@ -82,8 +119,9 @@ export const apiService = {
     try {
       const { error } = await sb.from('sections').upsert({
         name: section.name,
-        is_active: section.isActive
-      }, { onConflict: 'name' });
+        is_active: section.isActive,
+        organization_id: section.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
+      }, { onConflict: 'name,organization_id' });
       if (error) throw error;
       return true;
     } catch (err) {
@@ -92,11 +130,20 @@ export const apiService = {
     }
   },
 
-  async getSettings(): Promise<AssessmentSettings | null> {
+  async getSettings(organizationId?: string): Promise<AssessmentSettings | null> {
     const sb = getSupabase();
     if (!sb) return null;
     try {
-      const { data, error } = await sb.from('settings').select('*');
+      let query = sb.from('settings').select('*');
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      } else {
+        // Fallback or default? For now, fetch all might be wrong if multiple settings exist.
+        // Prefer specific org if known. If not, maybe limit 1?
+        // Let's assume passed ID for now.
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
       const settingsMap: any = {};
@@ -104,7 +151,17 @@ export const apiService = {
         settingsMap[item.key] = item.value;
       });
 
+      // If no settings found for this org, return defaults
+      if (data.length === 0) return {
+        organizationId,
+        overallTimeLimitMins: 20,
+        questionTimeLimitSecs: 60,
+        totalQuestions: 20,
+        questionsPerSection: { 'SQL Basics': 5, 'IQ': 5, 'Behavioural': 5, 'Analytical Ability': 5 }
+      };
+
       return {
+        organizationId: organizationId,
         overallTimeLimitMins: Number(settingsMap.overall_time ?? 20),
         questionTimeLimitSecs: Number(settingsMap.per_question_time ?? 60),
         totalQuestions: Number(settingsMap.total_questions ?? 20),
@@ -121,17 +178,88 @@ export const apiService = {
     }
   },
 
+  async getOrganizations(): Promise<Organization[]> {
+    const sb = getSupabase();
+    if (!sb) return [];
+    try {
+      const { data, error } = await sb.from('organizations').select('*').order('name');
+      if (error) throw error;
+      return (data || []).map(o => ({
+        id: o.id,
+        name: o.name,
+        adminName: o.admin_name,
+        adminEmail: o.admin_email,
+        createdBy: o.created_by,
+        createdAt: o.created_at
+      }));
+    } catch (err) {
+      console.error("Failed to fetch organizations", err);
+      return [];
+    }
+  },
+
+  async addOrganization(name: string, adminName: string, adminEmail: string, createdBy: string = 'system'): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      // Force lowercase name
+      const normalizedName = name.trim().toLowerCase();
+
+      const { error } = await sb.from('organizations').insert([{
+        name: normalizedName,
+        admin_name: adminName,
+        admin_email: adminEmail,
+        created_by: createdBy
+      }]);
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Failed to add organization", err);
+      return false;
+    }
+  },
+
+  async updateOrganization(org: Organization): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('organizations').update({
+        admin_name: org.adminName,
+        admin_email: org.adminEmail
+      }).eq('id', org.id);
+
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Failed to update organization", err);
+      return false;
+    }
+  },
+
+  async deleteOrganization(id: string): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('organizations').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error("Failed to delete organization", err);
+      return false;
+    }
+  },
+
   async updateSettings(settings: AssessmentSettings) {
     const sb = getSupabase();
     if (!sb) return false;
     try {
+      const orgId = settings.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883';
       const payload = [
-        { key: 'overall_time', value: settings.overallTimeLimitMins },
-        { key: 'per_question_time', value: settings.questionTimeLimitSecs },
-        { key: 'total_questions', value: settings.totalQuestions },
-        { key: 'section_config', value: settings.questionsPerSection }
+        { key: 'overall_time', value: settings.overallTimeLimitMins, organization_id: orgId },
+        { key: 'per_question_time', value: settings.questionTimeLimitSecs, organization_id: orgId },
+        { key: 'total_questions', value: settings.totalQuestions, organization_id: orgId },
+        { key: 'section_config', value: settings.questionsPerSection, organization_id: orgId }
       ];
-      const { error } = await sb.from('settings').upsert(payload, { onConflict: 'key' });
+      const { error } = await sb.from('settings').upsert(payload, { onConflict: 'key,organization_id' });
       if (error) throw error;
       return true;
     } catch (err) {
@@ -140,10 +268,82 @@ export const apiService = {
     }
   },
 
+  async getUsers(organizationId?: string): Promise<User[]> {
+    const sb = getSupabase();
+    if (!sb) return [];
+    try {
+      let query = sb.from('users').select('*').order('created_at', { ascending: false });
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map(u => ({
+        id: u.id,
+        organizationId: u.organization_id,
+        email: u.email,
+        fullName: u.full_name,
+        role: u.role as UserRole,
+        createdAt: u.created_at
+      }));
+    } catch (err) {
+      console.error("Failed to fetch users", err);
+      return [];
+    }
+  },
+
+  async addUser(user: Omit<User, 'id' | 'createdAt'>): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('users').insert([{
+        email: user.email,
+        full_name: user.fullName,
+        role: user.role,
+        organization_id: user.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
+      }]);
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Failed to add user", err);
+      return false;
+    }
+  },
+
+  async updateUser(user: User): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('users').update({
+        email: user.email,
+        full_name: user.fullName,
+        role: user.role
+      }).eq('id', user.id);
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Failed to update user", err);
+      return false;
+    }
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('users').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error("Failed to delete user", err);
+      return false;
+    }
+  },
+
   async checkInfrastructure() {
     const sb = getSupabase();
     if (!sb) return { connected: false, tables: {} };
-    const tables = ['questions', 'results', 'evaluations', 'settings', 'sections'];
+    const tables = ['questions', 'results', 'evaluations', 'settings', 'sections', 'organizations', 'users'];
     const status: Record<string, boolean> = {};
     for (const table of tables) {
       try {
@@ -172,10 +372,11 @@ export const apiService = {
     page = 1,
     pageSize = 10,
     category = '',
-    search = ''
+    search = '',
+    organizationId?: string
   ): Promise<{ data: Question[], count: number }> {
     const sb = getSupabase();
-    if (!sb) return { data: SEED_QUESTIONS, count: SEED_QUESTIONS.length };
+    if (!sb) return { data: [], count: 0 };
 
     try {
       let query = sb.from('questions').select('*', { count: 'exact' });
@@ -183,6 +384,7 @@ export const apiService = {
       if (onlyActive) query = query.eq('is_active', true);
       if (category) query = query.eq('category', category);
       if (search) query = query.ilike('text', `%${search}%`);
+      if (organizationId) query = query.eq('organization_id', organizationId);
 
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -196,7 +398,7 @@ export const apiService = {
       const formatted = (data || []).map(q => ({
         id: q.id, category: q.category, difficulty: q.difficulty,
         text: q.text, options: q.options, correctOption: q.correct_option,
-        isActive: q.is_active
+        isActive: q.is_active, organizationId: q.organization_id
       }));
 
       return { data: formatted, count: count || 0 };
@@ -213,7 +415,9 @@ export const apiService = {
       const { error } = await sb.from('questions').upsert({
         id: question.id, category: question.category, difficulty: question.difficulty,
         text: question.text, options: question.options, correct_option: question.correctOption,
-        is_active: question.isActive
+        is_active: question.isActive,
+
+        organization_id: question.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
       }, { onConflict: 'id' });
       if (error) throw error;
       return true;
@@ -243,7 +447,8 @@ export const apiService = {
         started_at: result.startedAt, submitted_at: result.submittedAt, total_time_taken_sec: result.totalTimeTakenSec,
         total_questions: result.totalQuestions, attempted_count: result.attemptedCount, missed_count: result.missedCount,
         correct_count: result.correctCount, wrong_count: result.wrongCount, avg_time_per_answered_sec: result.avgTimePerAnsweredSec,
-        score_percent: result.scorePercent, answers_json: JSON.parse(result.answersJson)
+        score_percent: result.scorePercent, answers_json: JSON.parse(result.answersJson),
+        organization_id: result.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
       }]);
       return !error;
     } catch {
@@ -262,6 +467,53 @@ export const apiService = {
     }
   },
 
+  async getCandidates(organizationId?: string): Promise<Candidate[]> {
+    const sb = getSupabase();
+    if (!sb) return [];
+    try {
+      let query = sb.from('candidates').select('*').order('created_at', { ascending: false });
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map(c => ({
+        id: c.id,
+        email: c.email,
+        fullName: c.full_name,
+        organizationId: c.organization_id,
+        status: c.status,
+        createdAt: c.created_at
+      }));
+    } catch (err) {
+      console.error("Get candidates error:", err);
+      return [];
+    }
+  },
+
+  async addCandidate(candidate: { email: string, fullName: string, organizationId?: string }) {
+    const sb = getSupabase();
+    if (!sb) return false;
+    const { error } = await sb.from('candidates').insert([{
+      email: candidate.email,
+      full_name: candidate.fullName,
+      organization_id: candidate.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883',
+      status: 'Registered'
+    }]);
+    if (error) {
+      console.error("Add candidate error:", error);
+      return false;
+    }
+    return true;
+  },
+
+  async deleteCandidate(id: string) {
+    const sb = getSupabase();
+    if (!sb) return false;
+    const { error } = await sb.from('candidates').delete().eq('id', id);
+    return !error;
+  },
+
   async submitInterviewEvaluation(evalData: InterviewEvaluation): Promise<boolean> {
     const sb = getSupabase();
     if (!sb) return false;
@@ -269,7 +521,8 @@ export const apiService = {
       const { error } = await sb.from('evaluations').insert([{
         id: evalData.evaluationId, candidate_email: evalData.candidateEmail, interviewer_name: evalData.interviewerName,
         level: evalData.level, ratings: evalData.ratings, notes: evalData.notes, final_outcome: evalData.finalOutcome,
-        final_comments: evalData.finalComments, submitted_at: evalData.submittedAt
+        final_comments: evalData.finalComments, submitted_at: evalData.submittedAt,
+        organization_id: evalData.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
       }]);
       return !error;
     } catch {
@@ -277,11 +530,15 @@ export const apiService = {
     }
   },
 
-  async getAllResults(): Promise<ExamResult[]> {
+  async getAllResults(organizationId?: string): Promise<ExamResult[]> {
     const sb = getSupabase();
     if (!sb) return [];
     try {
-      const { data, error } = await sb.from('results').select('*').order('submitted_at', { ascending: false });
+      let query = sb.from('results').select('*').order('submitted_at', { ascending: false });
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []).map(r => ({
         attemptId: r.id, candidateName: r.candidate_name, candidateEmail: r.candidate_email,
@@ -295,11 +552,15 @@ export const apiService = {
     }
   },
 
-  async getAllEvaluations(): Promise<InterviewEvaluation[]> {
+  async getAllEvaluations(organizationId?: string): Promise<InterviewEvaluation[]> {
     const sb = getSupabase();
     if (!sb) return [];
     try {
-      const { data, error } = await sb.from('evaluations').select('*').order('submitted_at', { ascending: false });
+      let query = sb.from('evaluations').select('*').order('submitted_at', { ascending: false });
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []).map(e => ({
         evaluationId: e.id, candidateEmail: e.candidate_email, interviewerName: e.interviewer_name,
@@ -312,11 +573,18 @@ export const apiService = {
     }
   },
 
-  async getEvaluation(email: string): Promise<InterviewEvaluation | null> {
+  async getEvaluation(email: string, organizationId?: string): Promise<InterviewEvaluation | null> {
     const sb = getSupabase();
     if (!sb) return null;
     try {
-      const { data, error } = await sb.from('evaluations').select('*').eq('candidate_email', email).limit(1).single();
+      let query = sb.from('evaluations').select('*').eq('candidate_email', email);
+
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      const { data, error } = await query.limit(1).single();
+
       if (error) return null;
       return {
         evaluationId: data.id, candidateEmail: data.candidate_email, interviewerName: data.interviewer_name,
@@ -329,24 +597,7 @@ export const apiService = {
     }
   },
 
-  async initializeDatabase() {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Database connection not established.");
 
-    const uniqueCats = Array.from(new Set(SEED_QUESTIONS.map(q => q.category)));
-    for (const cat of uniqueCats) {
-      await this.saveSection({ name: cat, isActive: true });
-    }
-
-    const formattedQuestions = SEED_QUESTIONS.map(q => ({
-      id: q.id, category: q.category, difficulty: q.difficulty,
-      text: q.text, options: q.options, correct_option: q.correctOption,
-      is_active: q.isActive
-    }));
-    const { error } = await sb.from('questions').upsert(formattedQuestions, { onConflict: 'id' });
-    if (error) throw error;
-    return true;
-  },
 
   async generateProbeQuestions(standardTitle: string, level: string, contextIndicators: string[]): Promise<string[]> {
     try {

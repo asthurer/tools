@@ -6,13 +6,14 @@ import { Rating, AssessmentLevel, EvaluationOutcome, InterviewEvaluation } from 
 interface Props {
   candidateEmail: string;
   candidateName: string;
+  organizationId?: string;
   onClose: () => void;
   onSubmit: (evaluation: InterviewEvaluation) => void;
 }
 
 import { apiService } from '../services/api';
 
-export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candidateName, onClose, onSubmit }) => {
+export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candidateName, organizationId, onClose, onSubmit }) => {
   const [level, setLevel] = useState<AssessmentLevel>('L4');
   const [interviewerName, setInterviewerName] = useState('');
   const [ratings, setRatings] = useState<Record<string, Rating>>({});
@@ -26,7 +27,7 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
 
   useEffect(() => {
     const loadEvaluation = async () => {
-      const existing = await apiService.getEvaluation(candidateEmail);
+      const existing = await apiService.getEvaluation(candidateEmail, organizationId);
       if (existing) {
         setLevel(existing.level);
         setInterviewerName(existing.interviewerName);
@@ -60,7 +61,8 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
       notes,
       finalOutcome,
       finalComments,
-      submittedAt: new Date().toISOString()
+      submittedAt: new Date().toISOString(),
+      organizationId: organizationId
     };
     onSubmit(evalData);
   };

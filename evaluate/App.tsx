@@ -12,7 +12,8 @@ const App: React.FC = () => {
     view: 'landing',
     candidate: null,
     currentAttempt: null,
-    lastResult: null
+    lastResult: null,
+    currentUser: null
   });
 
   const [isAdminAuthVisible, setIsAdminAuthVisible] = useState(false);
@@ -34,7 +35,8 @@ const App: React.FC = () => {
     const initApp = async () => {
       const session = await apiService.getSession();
       if (session) {
-        setState(prev => ({ ...prev, view: 'admin' }));
+        const userProfile = await apiService.getUserProfile(session.user.email || '');
+        setState(prev => ({ ...prev, view: 'admin', currentUser: userProfile }));
       }
 
       const settings = await apiService.getSettings();
@@ -177,7 +179,8 @@ const App: React.FC = () => {
     setAdminError(null);
     try {
       await apiService.signIn(adminEmail, adminPassword);
-      setState(prev => ({ ...prev, view: 'admin' }));
+      const userProfile = await apiService.getUserProfile(adminEmail);
+      setState(prev => ({ ...prev, view: 'admin', currentUser: userProfile }));
       setIsAdminAuthVisible(false);
       setAdminEmail('');
       setAdminPassword('');
@@ -337,6 +340,7 @@ const App: React.FC = () => {
             setState(prev => ({ ...prev, view: 'interviewer-form' }));
           }}
           onLogout={handleLogout}
+          currentUser={state.currentUser}
         />
       )}
 
@@ -344,6 +348,7 @@ const App: React.FC = () => {
         <InterviewEvaluationView
           candidateName={evalCandidate.name}
           candidateEmail={evalCandidate.email}
+          organizationId={state.currentUser?.organizationId}
           onClose={() => {
             setEvalCandidate(null);
             setState(prev => ({ ...prev, view: 'admin' }));

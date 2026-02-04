@@ -9,11 +9,43 @@ export type AssessmentLevel = 'L4' | 'L5-L7';
 
 export interface Section {
   name: string;
+  organizationId?: string;
   isActive: boolean;
   createdAt?: string;
 }
 
+export interface Organization {
+  id: string;
+  name: string;
+  adminName: string;
+  adminEmail: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+
+export interface Candidate {
+  id: string;
+  organizationId?: string;
+  email: string;
+  fullName: string;
+  status: string;
+  createdAt?: string;
+}
+
+export type UserRole = 'super_admin' | 'admin';
+
+export interface User {
+  id: string;
+  organizationId?: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  createdAt?: string;
+}
+
 export interface AssessmentSettings {
+  organizationId?: string;
   overallTimeLimitMins: number;
   questionTimeLimitSecs: number;
   totalQuestions: number;
@@ -22,6 +54,7 @@ export interface AssessmentSettings {
 
 export interface Question {
   id: string;
+  organizationId?: string;
   category: Category;
   difficulty: Difficulty;
   text: string;
@@ -46,6 +79,7 @@ export interface AnswerDetail {
 
 export interface ExamResult {
   attemptId: string;
+  organizationId?: string;
   candidateName: string;
   candidateEmail: string;
   startedAt: string;
@@ -63,6 +97,7 @@ export interface ExamResult {
 
 export interface InterviewEvaluation {
   evaluationId: string;
+  organizationId?: string;
   candidateEmail: string;
   interviewerName: string;
   level: AssessmentLevel;
@@ -97,4 +132,5 @@ export interface AppState {
   } | null;
   lastResult?: ExamResult | null;
   activeEvaluationCandidate?: string; // email
+  currentUser?: User | null;
 }

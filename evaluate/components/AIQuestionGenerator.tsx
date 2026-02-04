@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Question, Category, Difficulty, OptionKey } from '../types';
 
 interface Props {
@@ -30,46 +30,39 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
     setSelectedIndices(new Set());
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-pro-preview",
-        contents: `Generate exactly 5 distinct and professional multiple-choice questions for a corporate technical assessment.
+      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+      if (!apiKey) throw new Error("API Key configuration missing.");
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const prompt = `Generate exactly 5 distinct and professional multiple-choice questions for a corporate technical assessment.
           Category: ${finalCategory}
           Difficulty Level: ${difficulty}
-          Context: Data Operations, Analytics, and Engineering roles. Ensure options are plausible but only one is clearly correct.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                text: { type: Type.STRING, description: "The question text." },
-                options: {
-                  type: Type.OBJECT,
-                  properties: {
-                    A: { type: Type.STRING },
-                    B: { type: Type.STRING },
-                    C: { type: Type.STRING },
-                    D: { type: Type.STRING },
-                  },
-                  required: ["A", "B", "C", "D"]
-                },
-                correctOption: { 
-                    type: Type.STRING, 
-                    description: "The correct key (A, B, C, or D)."
-                }
-              },
-              required: ["text", "options", "correctOption"]
+          Context: Data Operations, Analytics, and Engineering roles. Ensure options are plausible but only one is clearly correct.
+          
+          Return the response as a valid JSON array of objects with the following structure:
+          [
+            {
+              "text": "Question text here",
+              "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+              "correctOption": "A"
             }
-          }
-        }
-      });
+          ]
+          Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
 
-      const textOutput = response.text;
-      if (!textOutput) throw new Error("Synthesis failure.");
-      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      let textOutput = response.text();
+
+      if (!textOutput) throw new Error("No content generated.");
+
+      // Cleanup if model returns markdown
+      textOutput = textOutput.replace(/```json/g, '').replace(/```/g, '').trim();
+
       const json = JSON.parse(textOutput);
+      if (!Array.isArray(json)) throw new Error("Invalid response format.");
+
       const formatted: Question[] = json.map((q: any, i: number) => ({
         id: `ai_${Date.now()}_${i}`,
         category: finalCategory,
@@ -82,9 +75,9 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
 
       setGenerated(formatted);
       setSelectedIndices(new Set(formatted.map((_, i) => i)));
-    } catch (err) {
+    } catch (err: any) {
       console.error("AI Error:", err);
-      alert("AI Architect failed to respond. Verify API connectivity.");
+      alert(`AI Architect failed: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -119,7 +112,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
           <div className="flex flex-col">
             <div className="flex justify-between items-center mb-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Topic Domain</label>
-              <button 
+              <button
                 onClick={() => setIsCustomCategory(!isCustomCategory)}
                 className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline"
               >
@@ -127,14 +120,14 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
               </button>
             </div>
             {isCustomCategory ? (
-              <input 
+              <input
                 placeholder="Custom Domain Name"
                 value={customCategory}
                 onChange={e => setCustomCategory(e.target.value)}
                 className="p-4 bg-white border-2 border-indigo-50 rounded-2xl font-bold outline-none shadow-sm focus:border-indigo-400"
               />
             ) : (
-              <select 
+              <select
                 value={category}
                 onChange={e => setCategory(e.target.value)}
                 className="p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold outline-none cursor-pointer"
@@ -146,7 +139,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
 
           <div>
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Difficulty Grade</label>
-            <select 
+            <select
               value={difficulty}
               onChange={e => setDifficulty(e.target.value as Difficulty)}
               className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold outline-none cursor-pointer"
@@ -157,7 +150,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
             </select>
           </div>
 
-          <button 
+          <button
             onClick={handleGenerate}
             disabled={loading}
             className="bg-[#002b49] text-[#d4af37] p-5 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-xl shadow-[#002b49]/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 h-[62px]"
@@ -176,33 +169,31 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
 
           {!loading && generated.length === 0 && (
             <div className="py-24 text-center border-4 border-dashed border-slate-50 rounded-[40px] text-slate-200">
-               <div className="text-4xl mb-4 opacity-20">🧬</div>
-               <p className="text-[11px] font-black uppercase tracking-[0.3em]">Configure parameters and initiate synthesis</p>
+              <div className="text-4xl mb-4 opacity-20">🧬</div>
+              <p className="text-[11px] font-black uppercase tracking-[0.3em]">Configure parameters and initiate synthesis</p>
             </div>
           )}
 
           {generated.map((q, i) => (
-            <div 
-              key={i} 
+            <div
+              key={i}
               onClick={() => toggleSelection(i)}
-              className={`p-8 rounded-[32px] border-2 cursor-pointer transition-all ${
-                selectedIndices.has(i) 
-                ? 'bg-white border-indigo-600 shadow-xl ring-8 ring-indigo-50/30' 
+              className={`p-8 rounded-[32px] border-2 cursor-pointer transition-all ${selectedIndices.has(i)
+                ? 'bg-white border-indigo-600 shadow-xl ring-8 ring-indigo-50/30'
                 : 'bg-slate-50 border-transparent hover:border-slate-200'
-              }`}
+                }`}
             >
               <div className="flex justify-between items-start mb-6">
                 <div className="flex-1">
-                  <span className="text-[9px] font-black uppercase text-indigo-500 tracking-widest mb-2 block">Proposed Entry {i+1}</span>
+                  <span className="text-[9px] font-black uppercase text-indigo-500 tracking-widest mb-2 block">Proposed Entry {i + 1}</span>
                   <p className="text-lg font-bold text-slate-900 leading-tight">{q.text}</p>
                 </div>
-                <div className={`w-10 h-10 rounded-2xl border-2 flex items-center justify-center transition-all ${
-                  selectedIndices.has(i) ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-slate-200 text-transparent'
-                }`}>
+                <div className={`w-10 h-10 rounded-2xl border-2 flex items-center justify-center transition-all ${selectedIndices.has(i) ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-slate-200 text-transparent'
+                  }`}>
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {(['A', 'B', 'C', 'D'] as OptionKey[]).map(key => (
                   <div key={key} className={`p-3 rounded-xl border text-[11px] font-bold flex items-center gap-3 ${q.correctOption === key ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-slate-100 text-slate-500'}`}>
@@ -221,12 +212,12 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
               Queueing <span className="text-indigo-600">{selectedIndices.size}</span> selections for deployment
             </p>
             <div className="flex gap-4">
-               <button onClick={onClose} className="px-8 py-4 font-black uppercase text-[10px] text-slate-400 tracking-widest hover:text-slate-900 transition-colors">Abort</button>
-               <button 
+              <button onClick={onClose} className="px-8 py-4 font-black uppercase text-[10px] text-slate-400 tracking-widest hover:text-slate-900 transition-colors">Abort</button>
+              <button
                 onClick={handleAddSelected}
                 disabled={selectedIndices.size === 0}
                 className="bg-[#002b49] text-[#d4af37] px-12 py-4 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
-               >Commit to Bank</button>
+              >Commit to Bank</button>
             </div>
           </div>
         )}
