@@ -21,6 +21,9 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [finalOutcome, setFinalOutcome] = useState<EvaluationOutcome | null>(null);
   const [finalComments, setFinalComments] = useState('');
+  const [existingId, setExistingId] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showConfirmClose, setShowConfirmClose] = useState(false);
 
   // AI Regeneration State
   const [customQuestions, setCustomQuestions] = useState<Record<string, string[]>>({});
@@ -32,23 +35,28 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
       const lookupKey = candidateId || candidateEmail;
       const existing = await apiService.getEvaluation(lookupKey, organizationId);
       if (existing) {
+        setExistingId(existing.id || null);
         setLevel(existing.level);
         setInterviewerName(existing.interviewerName);
         setRatings(existing.ratings);
         setNotes(existing.notes || {});
         setFinalOutcome(existing.finalOutcome);
         setFinalComments(existing.finalComments || '');
+        // Reset dirty state after loading existing data
+        setIsDirty(false);
       }
     };
     loadEvaluation();
-  }, [candidateEmail]);
+  }, [candidateEmail, candidateId]); // Added candidateId dependency
 
   const handleRating = (standardId: string, rating: Rating) => {
     setRatings(prev => ({ ...prev, [standardId]: rating }));
+    setIsDirty(true);
   };
 
   const handleNote = (standardId: string, text: string) => {
     setNotes(prev => ({ ...prev, [standardId]: text }));
+    setIsDirty(true);
   };
 
   const isFormComplete = interviewerName && finalOutcome && Object.keys(ratings).length === LEADERSHIP_STANDARDS.length;
@@ -56,7 +64,7 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
   const handleSubmit = () => {
     if (!isFormComplete) return;
     const evalData: InterviewEvaluation = {
-      id: `eval_${Date.now()}`,
+      id: existingId || `eval_${Date.now()}`,
       candidateEmail,
       interviewerName,
       level,
@@ -70,10 +78,18 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
     onSubmit(evalData);
   };
 
+  const handleClose = () => {
+    if (isDirty) {
+      setShowConfirmClose(true);
+    } else {
+      onClose();
+    }
+  };
+
   const handleRegenerateQuestions = async (standard: typeof LEADERSHIP_STANDARDS[0]) => {
     setGeneratingFor(standard.id);
     try {
-      const newQuestions = await apiService.generateProbeQuestions(standard.title, level, standard.positives);
+      const newQuestions = await apiService.generateProbeQuestions(standard.title, level, standard.positives, organizationId);
       setCustomQuestions(prev => ({
         ...prev,
         [standard.id]: newQuestions
@@ -86,14 +102,40 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
   };
 
   return (
-    <div className="bg-[#002b49] min-h-screen text-white pb-32">
+    <div className="bg-[#002b49] min-h-screen text-white pb-32 relative">
+      {/* Confirmation Modal */}
+      {showConfirmClose && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-2xl font-black text-[#002b49] mb-4 uppercase tracking-tight">Unsaved Changes</h3>
+            <p className="text-slate-500 font-medium mb-8 leading-relaxed">
+              You have unsaved changes in this evaluation. Are you sure you want to close? All progress will be lost.
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowConfirmClose(false)}
+                className="flex-1 py-4 rounded-xl font-black uppercase text-xs tracking-widest bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+              >
+                Keep Editing
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 py-4 rounded-xl font-black uppercase text-xs tracking-widest bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+              >
+                Discard & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto px-4 py-12">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 border-b border-white/10 pb-10 gap-6">
           <div>
             <h1 className="text-5xl font-black uppercase tracking-tighter leading-none">Interview Toolkit</h1>
             <p className="text-[#d4af37] font-bold uppercase tracking-[0.4em] text-[10px] mt-4">Candidate Capability Assessment</p>
           </div>
-          <button onClick={onClose} className="bg-white/5 border border-white/10 px-8 py-3 rounded-xl text-white/60 hover:text-white font-black uppercase text-[10px] tracking-widest transition-all">Discard Changes</button>
+          <button onClick={handleClose} className="bg-white/5 border border-white/10 px-8 py-3 rounded-xl text-white/60 hover:text-white font-black uppercase text-[10px] tracking-widest transition-all">Close</button>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 mb-16">
@@ -108,18 +150,18 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
             <h3 className="text-[10px] font-black text-[#d4af37] uppercase tracking-widest mb-6">Panel Configuration</h3>
             <div className="flex gap-4 mb-6">
               <button
-                onClick={() => setLevel('L4')}
+                onClick={() => { setLevel('L4'); setIsDirty(true); }}
                 className={`flex-1 py-3 rounded-xl font-black text-[10px] tracking-widest transition-all ${level === 'L4' ? 'bg-[#d4af37] text-[#002b49] shadow-lg shadow-[#d4af37]/20' : 'bg-white/5 text-white/50 border border-white/10'}`}
               >L4 GRADE</button>
               <button
-                onClick={() => setLevel('L5-L7')}
+                onClick={() => { setLevel('L5-L7'); setIsDirty(true); }}
                 className={`flex-1 py-3 rounded-xl font-black text-[10px] tracking-widest transition-all ${level === 'L5-L7' ? 'bg-[#d4af37] text-[#002b49] shadow-lg shadow-[#d4af37]/20' : 'bg-white/5 text-white/50 border border-white/10'}`}
               >L5-L7 GRADE</button>
             </div>
             <input
               placeholder="Primary Interviewer Name"
               value={interviewerName}
-              onChange={e => setInterviewerName(e.target.value)}
+              onChange={e => { setInterviewerName(e.target.value); setIsDirty(true); }}
               className="w-full bg-white border-2 border-[#d4af37]/30 text-slate-900 placeholder-slate-300 rounded-xl p-4 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] font-bold transition-all shadow-inner"
             />
           </div>
@@ -224,14 +266,15 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-6 block">Recommendation</label>
                 <div className="grid gap-4">
-                  {(['Decline', 'Progress to next stage', 'Offer'] as EvaluationOutcome[]).map(o => (
+                  {(['Decline', 'On Hold', 'Progress to next stage', 'Offer'] as EvaluationOutcome[]).map(o => (
                     <button
                       key={o}
-                      onClick={() => setFinalOutcome(o)}
+                      onClick={() => { setFinalOutcome(o); setIsDirty(true); }}
                       className={`text-left p-5 rounded-2xl border-2 font-black uppercase text-xs tracking-widest transition-all bg-white ${finalOutcome === o
                         ? o === 'Decline' ? 'bg-red-50 border-red-500 text-red-700' :
                           o === 'Offer' ? 'bg-green-50 border-green-500 text-green-700' :
-                            'bg-amber-50 border-amber-500 text-amber-700'
+                            o === 'On Hold' ? 'bg-amber-50 border-amber-500 text-amber-700' :
+                              'bg-amber-50 border-amber-500 text-amber-700'
                         : 'border-slate-100 hover:border-slate-200 text-slate-400 shadow-sm'
                         }`}
                     >
@@ -245,7 +288,7 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
                 <textarea
                   placeholder="Summarize key strengths and alignment to Organization culture..."
                   value={finalComments}
-                  onChange={e => setFinalComments(e.target.value)}
+                  onChange={e => { setFinalComments(e.target.value); setIsDirty(true); }}
                   className="w-full flex-1 p-8 bg-white text-slate-900 border border-slate-200 rounded-[32px] outline-none focus:border-[#002b49] placeholder-slate-300 text-sm font-medium leading-relaxed shadow-sm"
                 />
               </div>

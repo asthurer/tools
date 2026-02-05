@@ -1,41 +1,38 @@
 
 import React, { useState } from 'react';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { aiService } from '../services/aiService';
 import { Question, Category, Difficulty, OptionKey } from '../types';
 
 interface Props {
   existingCategories: string[];
   onSaveQuestions: (questions: Question[]) => void;
   onClose: () => void;
+  organizationId?: string;
 }
 
-export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSaveQuestions, onClose }) => {
+export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSaveQuestions, onClose, organizationId }) => {
   const [category, setCategory] = useState(existingCategories[0] || 'General');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategory, setCustomCategory] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('Medium');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState<Question[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
 
   const handleGenerate = async () => {
     const finalCategory = isCustomCategory ? customCategory.trim() : category;
     if (isCustomCategory && !finalCategory) {
-      alert("Please enter a custom category name.");
+      setError("Please enter a custom category name.");
       return;
     }
 
+    setError(null);
     setLoading(true);
     setGenerated([]);
     setSelectedIndices(new Set());
 
     try {
-      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
-      if (!apiKey) throw new Error("API Key configuration missing.");
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
       const prompt = `Generate exactly 5 distinct and professional multiple-choice questions for a corporate technical assessment.
           Category: ${finalCategory}
           Difficulty Level: ${difficulty}
@@ -51,16 +48,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
           ]
           Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let textOutput = response.text();
-
-      if (!textOutput) throw new Error("No content generated.");
-
-      // Cleanup if model returns markdown
-      textOutput = textOutput.replace(/```json/g, '').replace(/```/g, '').trim();
-
-      const json = JSON.parse(textOutput);
+      const json = await aiService.generateJSON<any[]>(prompt, organizationId);
       if (!Array.isArray(json)) throw new Error("Invalid response format.");
 
       const formatted: Question[] = json.map((q: any, i: number) => ({
@@ -77,7 +65,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
       setSelectedIndices(new Set(formatted.map((_, i) => i)));
     } catch (err: any) {
       console.error("AI Error:", err);
-      alert(`AI Architect failed: ${err.message || 'Unknown error'}`);
+      setError(`AI Architect failed: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -158,6 +146,19 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
             {loading ? 'Processing Neural Model...' : 'Initiate Synthesis'}
           </button>
         </div>
+
+        {error && (
+          <div className="mb-8 p-6 bg-red-50 border-2 border-red-100 rounded-3xl flex items-center justify-between animate-in slide-in-from-top-4 duration-300">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-red-500 text-white rounded-2xl flex items-center justify-center text-xl shadow-lg shadow-red-500/20">!</div>
+              <div>
+                <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest leading-none mb-1">Neural Fault Detected</h4>
+                <p className="text-red-900 font-bold text-sm leading-tight">{error}</p>
+              </div>
+            </div>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 font-black uppercase text-[10px] tracking-widest">Clear</button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto pr-4 space-y-6 custom-scrollbar min-h-[300px]">
           {loading && (

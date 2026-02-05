@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppState, Question, AnswerDetail, ExamResult, InterviewEvaluation, AssessmentSettings } from './types';
 import { apiService } from './services/api';
 import { TOTAL_QUESTIONS, OVERALL_TIME_LIMIT_SEC, QUESTION_TIME_LIMIT_SEC } from './constants';
@@ -99,6 +99,7 @@ const App: React.FC = () => {
 
       const hasExistingResult = await apiService.checkResultExists(candidateId);
       if (hasExistingResult) {
+        setState(prev => ({ ...prev, candidate: { email, fullName: name, organizationId: validOrgId } }));
         setError("Results are awaited, please contact the interview SPOC");
         return;
       }
@@ -254,6 +255,10 @@ const App: React.FC = () => {
     setSelectedDashboardOrgId(undefined);
   };
 
+  const handleTabChange = useCallback((tab: 'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates') => {
+    setState(prev => ({ ...prev, adminDashboardTab: tab }));
+  }, []);
+
   if (state.view === 'exam' && state.candidate && state.currentAttempt) {
     return (
       <ExamView
@@ -334,7 +339,35 @@ const App: React.FC = () => {
                   <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-8">Candidate Entry</h2>
                   {error && (
                     <div className="mb-6 p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-700 text-xs font-bold uppercase tracking-wide rounded-r-xl">
-                      {error}
+                      {error === "Results are awaited, please contact the interview SPOC" ? (
+                        <div>
+                          Results are awaited, please contact the interview SPOC.{" "}
+                          <button
+                            onClick={async () => {
+                              try {
+                                console.log('Fetching results for:', state.candidate);
+                                const results = await apiService.getAllResults(state.candidate?.organizationId);
+                                console.log('All results:', results);
+                                const result = results.find(r => r.candidateEmail === state.candidate?.email);
+                                console.log('Found result:', result);
+                                if (result) {
+                                  setState({ view: 'completion', candidate: state.candidate, currentAttempt: null, lastResult: result });
+                                } else {
+                                  setError('Unable to load your results. Please contact the interview SPOC.');
+                                }
+                              } catch (err) {
+                                console.error('Failed to fetch result:', err);
+                                setError('Error loading results. Please try again or contact the interview SPOC.');
+                              }
+                            }}
+                            className="underline hover:text-amber-900 transition-colors"
+                          >
+                            View Results
+                          </button>
+                        </div>
+                      ) : (
+                        error
+                      )}
                     </div>
                   )}
 
@@ -424,7 +457,20 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <button onClick={() => setState({ view: 'landing', candidate: null, currentAttempt: null, lastResult: null })} className="bg-[#002b49] text-white px-14 py-6 rounded-3xl font-black uppercase tracking-[0.3em] text-[11px] shadow-2xl active:scale-95 transition-all">Clear Environment</button>
+          <div className="flex gap-4">
+            <button
+              onClick={() => window.print()}
+              className="bg-slate-100 text-slate-700 px-14 py-6 rounded-3xl font-black uppercase tracking-[0.3em] text-[11px] shadow-lg hover:bg-slate-200 active:scale-95 transition-all"
+            >
+              Print
+            </button>
+            <button
+              onClick={() => setState({ view: 'landing', candidate: null, currentAttempt: null, lastResult: null })}
+              className="bg-[#002b49] text-white px-14 py-6 rounded-3xl font-black uppercase tracking-[0.3em] text-[11px] shadow-2xl active:scale-95 transition-all"
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
 
@@ -438,6 +484,8 @@ const App: React.FC = () => {
           currentUser={state.currentUser}
           selectedOrgId={state.currentUser?.role === 'super_admin' ? (selectedDashboardOrgId || state.currentUser?.organizationId) : state.currentUser?.organizationId}
           onOrganizationSelect={state.currentUser?.role === 'super_admin' ? setSelectedDashboardOrgId : undefined}
+          initialActiveTab={state.adminDashboardTab}
+          onTabChange={handleTabChange}
         />
       )}
 

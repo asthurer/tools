@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sections (
 -- 3. QUESTIONS TABLE
 CREATE TABLE IF NOT EXISTS questions (
   id TEXT PRIMARY KEY,
-  section_name TEXT NOT NULL,
+  category TEXT NOT NULL,
   organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c',
   difficulty TEXT NOT NULL,
   text TEXT NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS questions (
   correct_option CHAR(1) NOT NULL,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now(),
-  FOREIGN KEY (section_name, organization_id) REFERENCES sections(name, organization_id) ON UPDATE CASCADE
+  FOREIGN KEY (category, organization_id) REFERENCES sections(name, organization_id) ON UPDATE CASCADE
 );
 
 -- 4. RESULTS TABLE

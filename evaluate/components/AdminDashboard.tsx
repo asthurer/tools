@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section, Organization, User, UserRole, Candidate } from '../types';
+import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section, Organization, User, UserRole, Candidate, AuditLog, AuditEventType, AuditEntityType } from '../types';
 import { LEADERSHIP_STANDARDS, OVERALL_TIME_LIMIT_SEC, QUESTION_TIME_LIMIT_SEC } from '../constants';
 import { SUPABASE_CONFIG } from '../config';
 import { AIQuestionGenerator } from './AIQuestionGenerator';
@@ -12,9 +12,11 @@ interface Props {
   currentUser?: User | null;
   selectedOrgId?: string;
   onOrganizationSelect?: (id: string) => void;
+  initialActiveTab?: 'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates' | 'audit';
+  onTabChange?: (tab: 'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates' | 'audit') => void;
 }
 
-export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentUser, selectedOrgId: propSelectedOrgId, onOrganizationSelect }) => {
+export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentUser, selectedOrgId: propSelectedOrgId, onOrganizationSelect, initialActiveTab, onTabChange }) => {
   const [results, setResults] = useState<ExamResult[]>([]);
   const [evaluations, setEvaluations] = useState<InterviewEvaluation[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -22,14 +24,17 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   const [sections, setSections] = useState<Section[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [activeTab, setActiveTab] = useState<'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates'>('leaderboard');
+  const [activeTab, setActiveTab] = useState<'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates' | 'audit'>(initialActiveTab || 'leaderboard');
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [newCandidateData, setNewCandidateData] = useState({ email: '', fullName: '' });
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
-  const [newOrgData, setNewOrgData] = useState({ id: '', name: '', adminName: '', adminEmail: '' });
+  const [isEditingCandidate, setIsEditingCandidate] = useState(false);
+  const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
+  const [newOrgData, setNewOrgData] = useState({ id: '', name: '', adminName: '', adminEmail: '', aiLimit: 0 });
   const [isAddingOrg, setIsAddingOrg] = useState(false);
 
   const [isEditingOrg, setIsEditingOrg] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Internal state for non-lifted scenarios, or local override check
   // However, since we now lift state, we should rely on the prop if provided.
@@ -53,6 +58,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
       setLocalSelectedOrgId(currentUser.organizationId);
     }
   }, [currentUser, onOrganizationSelect, localSelectedOrgId]);
+
+  // Sync active tab changes to parent
+  useEffect(() => {
+    onTabChange?.(activeTab);
+  }, [activeTab, onTabChange]);
 
   const [newUserData, setNewUserData] = useState<{ id: string, email: string, fullName: string, role: UserRole }>({ id: '', email: '', fullName: '', role: 'admin' });
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -97,6 +107,18 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   const [newSectionName, setNewSectionName] = useState('');
   const [isAddingSection, setIsAddingSection] = useState(false);
 
+  // Audit Log State
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditFilters, setAuditFilters] = useState({
+    eventType: '' as AuditEventType | '',
+    entityType: '' as AuditEntityType | '',
+    userEmail: '',
+    startDate: '',
+    endDate: '',
+    limit: 100
+  });
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
   // Pagination & Filtering State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -138,6 +160,9 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
     fetchUsers();
     fetchCandidates();
     fetchAllQuestionsForLookup();
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    }
   }, [selectedOrgId]);
 
   useEffect(() => {
@@ -167,6 +192,38 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   const fetchCandidates = async () => {
     const list = await apiService.getCandidates(selectedOrgId);
     setCandidates(list);
+  };
+
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    try {
+      const logs = await apiService.getAuditLogs({
+        organizationId: selectedOrgId,
+        ...auditFilters,
+        eventType: auditFilters.eventType || undefined,
+        entityType: auditFilters.entityType || undefined,
+        userEmail: auditFilters.userEmail || undefined,
+        startDate: auditFilters.startDate || undefined,
+        endDate: auditFilters.endDate || undefined,
+        limit: auditFilters.limit
+      });
+      setAuditLogs(logs);
+    } catch (err) {
+      console.error("Fetch audit logs error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportAuditLogs = async () => {
+    const csv = await apiService.exportAuditLogs(auditLogs);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
   };
 
 
@@ -332,20 +389,22 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
   const handleEditOrganization = async () => {
     if (!newOrgData.adminName || !newOrgData.adminEmail) {
-      alert("Please fill all fields.");
+      setError("Please fill all fields.");
       return;
     }
+    setError(null);
     setLoading(true);
     const success = await apiService.updateOrganization({
       id: newOrgData.id,
-      name: newOrgData.name, // Name shouldn't change usually but keeping it for completeness if needed, though API ignores it mostly
+      name: newOrgData.name,
       adminName: newOrgData.adminName,
-      adminEmail: newOrgData.adminEmail
+      adminEmail: newOrgData.adminEmail,
+      aiLimit: newOrgData.aiLimit
     });
     setLoading(false);
 
     if (success) {
-      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '', aiLimit: 0 });
       setIsEditingOrg(false);
       setIsAddingOrg(false);
       fetchOrganizations();
@@ -374,16 +433,17 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
   const handleAddOrganization = async () => {
     if (!newOrgData.name || !newOrgData.adminName || !newOrgData.adminEmail) {
-      alert("Please fill all fields for the organization.");
+      setError("Please fill all fields for the organization.");
       return;
     }
+    setError(null);
 
     setLoading(true);
-    const success = await apiService.addOrganization(newOrgData.name, newOrgData.adminName, newOrgData.adminEmail);
+    const success = await apiService.addOrganization(newOrgData.name, newOrgData.adminName, newOrgData.adminEmail, newOrgData.aiLimit);
     setLoading(false);
 
     if (success) {
-      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+      setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '', aiLimit: 0 });
       setIsAddingOrg(false);
       fetchOrganizations();
       setSyncMessage({ text: "Organization added successfully.", type: 'success' });
@@ -461,9 +521,10 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
   const handleAddCandidate = async () => {
     if (!newCandidateData.email || !newCandidateData.fullName) {
-      alert("Please fill all fields.");
+      setError("Please fill all fields.");
       return;
     }
+    setError(null);
     setLoading(true);
     const success = await apiService.addCandidate({
       email: newCandidateData.email,
@@ -478,6 +539,31 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
       setSyncMessage({ text: "Candidate added successfully.", type: 'success' });
     } else {
       setSyncMessage({ text: "Failed to add candidate.", type: 'error' });
+    }
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
+
+  const handleEditCandidate = async () => {
+    if (!editingCandidateId || !newCandidateData.email || !newCandidateData.fullName) {
+      setError("Please fill all fields.");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    const success = await apiService.updateCandidate(editingCandidateId, {
+      ...newCandidateData,
+      organizationId: selectedOrgId
+    });
+    setLoading(false);
+    if (success) {
+      setNewCandidateData({ email: '', fullName: '' });
+      setIsAddingCandidate(false);
+      setIsEditingCandidate(false);
+      setEditingCandidateId(null);
+      fetchCandidates();
+      setSyncMessage({ text: "Candidate updated successfully.", type: 'success' });
+    } else {
+      setSyncMessage({ text: "Failed to update candidate.", type: 'error' });
     }
     setTimeout(() => setSyncMessage(null), 3000);
   };
@@ -637,9 +723,10 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
     const handleInternalSave = () => {
       const finalCategory = isAddingNewCategory ? newCategoryName.trim() : formData.category;
       if (!finalCategory) {
-        alert("Category is required.");
+        setError("Category is required.");
         return;
       }
+      setError(null);
       onSave({ ...formData, category: finalCategory } as Question);
     };
 
@@ -756,14 +843,16 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
     }
 
     try {
-      const verdict = await apiService.generateVerdict(profile.candidateName, profile.scorePercent, evaluation.ratings as Record<string, string>);
-      const success = await apiService.saveVerdict(evaluation.evaluationId, verdict, evaluation.notes);
+      const verdict = await apiService.generateVerdict(profile.candidateName, profile.scorePercent, evaluation.ratings as Record<string, string>, selectedOrgId);
+      if (!evaluation.id) throw new Error("Evaluation ID missing");
+      const success = await apiService.saveVerdict(evaluation.id, verdict, evaluation.notes);
       if (success) {
         // Optimistically update
-        setEvaluations(prev => prev.map(e => e.evaluationId === evaluation.evaluationId ? { ...e, aiVerdict: verdict } : e));
+        setEvaluations(prev => prev.map(e => e.id === evaluation.id ? { ...e, aiVerdict: verdict } : e));
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err: any) {
+      console.error(err);
+      setError(`Verdict generation failed: ${err.message || 'Unknown error'}`);
     } finally {
       setGeneratingVerdict(false);
     }
@@ -1062,6 +1151,18 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {error && (
+        <div className="mb-8 p-6 bg-red-50 border-2 border-red-100 rounded-3xl flex items-center justify-between animate-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-red-500 text-white rounded-2xl flex items-center justify-center text-xl shadow-lg shadow-red-500/20">!</div>
+            <div>
+              <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest leading-none mb-1">System Exception</h4>
+              <p className="text-red-900 font-bold text-sm leading-tight">{error}</p>
+            </div>
+          </div>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 font-black uppercase text-[10px] tracking-widest">Acknowledge</button>
+        </div>
+      )}
       {renderProfileModal()}
 
       {showManualModal && (
@@ -1088,7 +1189,9 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
       {isAddingCandidate && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-black text-slate-900 mb-6 uppercase tracking-tight">Register Candidate</h3>
+            <h3 className="text-xl font-black text-slate-900 mb-6 uppercase tracking-tight">
+              {isEditingCandidate ? 'Edit Candidate' : 'Register Candidate'}
+            </h3>
             <div className="space-y-4">
               <input
                 placeholder="Full Name"
@@ -1104,16 +1207,21 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
               />
               <div className="flex gap-3 mt-4">
                 <button
-                  onClick={() => setIsAddingCandidate(false)}
+                  onClick={() => {
+                    setIsAddingCandidate(false);
+                    setIsEditingCandidate(false);
+                    setEditingCandidateId(null);
+                    setNewCandidateData({ email: '', fullName: '' });
+                  }}
                   className="flex-1 py-4 text-slate-400 font-black uppercase text-[10px] tracking-widest hover:text-slate-600"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleAddCandidate}
+                  onClick={isEditingCandidate ? handleEditCandidate : handleAddCandidate}
                   className="flex-1 bg-[#002b49] text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all"
                 >
-                  Register
+                  {isEditingCandidate ? 'Update' : 'Register'}
                 </button>
               </div>
             </div>
@@ -1134,11 +1242,17 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
           existingCategories={getActiveCategories()}
           onClose={() => setShowAIGenerator(false)}
           onSaveQuestions={handleAISave}
+          organizationId={selectedOrgId}
         />
       )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
         <div>
+          {currentUser && (
+            <div className="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-1">
+              Logged in: <span className="text-slate-600">{currentUser.email}</span>
+            </div>
+          )}
           <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Recruitment Hub</h1>
           <p className="text-[#002b49] font-bold uppercase tracking-[0.2em] text-[10px] mt-2">Central Data Architecture & Quality Control</p>
           {currentUser?.role === 'super_admin' && (
@@ -1175,6 +1289,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
           <button onClick={() => {
             fetchData();
             if (activeTab === 'questions') fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
+            if (activeTab === 'audit') fetchAuditLogs();
           }} className="bg-[#002b49] text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg">Refresh Hub</button>
           {onLogout && (
             <button onClick={onLogout} className="bg-red-50 text-red-600 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-red-100 transition-all">Exit Hub</button>
@@ -1197,14 +1312,14 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
           </button>
         ))}
 
-        {currentUser?.role === 'super_admin' && (['organizations', 'users'] as const).map(tab => (
+        {currentUser?.role === 'super_admin' && (['organizations', 'users', 'audit'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-2 py-4 font-black text-[10px] uppercase tracking-[0.2em] transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#002b49] text-[#002b49]' : 'border-transparent text-slate-300 hover:text-slate-400'
               }`}
           >
-            {tab === 'organizations' ? '🏢 Organizations' : '👥 Users'}
+            {tab === 'organizations' ? '🏢 Organizations' : tab === 'users' ? '👥 Users' : '📊 Audit Logs'}
           </button>
         ))}
       </div>
@@ -1234,7 +1349,9 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                       <tr>
                         <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Rank</th>
                         <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Candidate Profile</th>
-                        <th className="px-10 py-5 text-[8px] font-black text-slate-400 uppercase tracking-widest text-center">Score</th>
+                        <th className="px-10 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">Test Score</th>
+                        <th className="px-10 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">AI Verdict</th>
+                        <th className="px-10 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">Interviewer</th>
                         <th className="px-10 py-5"></th>
                       </tr>
                     </thead>
@@ -1249,15 +1366,33 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                           <td className="px-10 py-8 text-center">
                             <span className="text-2xl font-black text-[#002b49] tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
                           </td>
+                          <td className="px-10 py-8 text-center">
+                            {evaluations.find(e => e.candidateEmail === r.candidateEmail)?.aiVerdict ? (
+                              <span className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 ${evaluations.find(e => e.candidateEmail === r.candidateEmail)?.aiVerdict?.decision === 'Hire' ? 'bg-green-50 text-green-600 border-green-100' :
+                                evaluations.find(e => e.candidateEmail === r.candidateEmail)?.aiVerdict?.decision === 'No Hire' ? 'bg-red-50 text-red-600 border-red-100' :
+                                  'bg-amber-50 text-amber-600 border-amber-100'
+                                }`}>
+                                {evaluations.find(e => e.candidateEmail === r.candidateEmail)?.aiVerdict?.decision}
+                              </span>
+                            ) : (
+                              <span className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 bg-blue-50 text-blue-600 border-blue-100">TBD</span>
+                            )}
+                          </td>
+                          <td className="px-10 py-8 text-center">
+                            {evaluations.find(e => e.candidateEmail === r.candidateEmail)?.finalOutcome ? (
+                              <span className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 ${evaluations.find(e => e.candidateEmail === r.candidateEmail)?.finalOutcome === 'Offer' ? 'bg-green-50 text-green-600 border-green-100' :
+                                evaluations.find(e => e.candidateEmail === r.candidateEmail)?.finalOutcome === 'Decline' ? 'bg-red-50 text-red-600 border-red-100' :
+                                  evaluations.find(e => e.candidateEmail === r.candidateEmail)?.finalOutcome === 'On Hold' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+                                    'bg-amber-50 text-amber-600 border-amber-100'
+                                }`}>
+                                {evaluations.find(e => e.candidateEmail === r.candidateEmail)?.finalOutcome}
+                              </span>
+                            ) : (
+                              <span className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 bg-blue-50 text-blue-600 border-blue-100">TBD</span>
+                            )}
+                          </td>
                           <td className="px-10 py-8 text-right flex items-center justify-end gap-3">
                             <button onClick={() => setSelectedProfile(r)} className="bg-[#002b49] text-white px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95">View Analytics</button>
-                            <button
-                              onClick={() => handleDeleteResult(r.attemptId)}
-                              className="p-4 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-all shadow-sm"
-                              title="Purge Record"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1289,36 +1424,41 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                 </button>
               </div>
 
-              {results.map(r => {
-                const isDone = evaluations.find(e => e.candidateEmail === r.candidateEmail);
-                return (
-                  <div key={r.attemptId} className="bg-white rounded-[48px] p-10 border border-slate-100 shadow-xl flex flex-col justify-between hover:shadow-2xl transition-all group">
-                    <div>
-                      <div className="text-[9px] font-black uppercase text-indigo-600 mb-6 flex justify-between items-center bg-indigo-50/50 px-4 py-2 rounded-full">
-                        <span className="tracking-widest">CAPABILITY STATUS</span>
-                        {isDone ? (
-                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full font-black text-[8px]">EVALUATED</span>
-                        ) : (
-                          <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-black text-[8px]">PENDING</span>
-                        )}
+              {results
+                .filter(r => {
+                  const candidate = candidates.find(c => c.id === r.candidateId || c.email === r.candidateEmail);
+                  return candidate?.status === 'Attempted';
+                })
+                .map(r => {
+                  const isDone = evaluations.find(e => e.candidateEmail === r.candidateEmail);
+                  return (
+                    <div key={r.attemptId} className="bg-white rounded-[48px] p-10 border border-slate-100 shadow-xl flex flex-col justify-between hover:shadow-2xl transition-all group">
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-indigo-600 mb-6 flex justify-between items-center bg-indigo-50/50 px-4 py-2 rounded-full">
+                          <span className="tracking-widest">CAPABILITY STATUS</span>
+                          {isDone ? (
+                            <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full font-black text-[8px]">EVALUATED</span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-black text-[8px]">PENDING</span>
+                          )}
+                        </div>
+                        <div className="text-2xl font-black text-slate-900 mb-2 leading-none tracking-tighter group-hover:text-[#002b49] transition-colors">{r.candidateName}</div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-8 truncate">{r.candidateEmail}</div>
+                        <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center mb-10 border border-slate-100 shadow-inner overflow-hidden">
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest whitespace-nowrap mr-2">Technical score</span>
+                          <span className="text-lg font-black text-slate-900 tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
+                        </div>
                       </div>
-                      <div className="text-2xl font-black text-slate-900 mb-2 leading-none tracking-tighter group-hover:text-[#002b49] transition-colors">{r.candidateName}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-8 truncate">{r.candidateEmail}</div>
-                      <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center mb-10 border border-slate-100 shadow-inner overflow-hidden">
-                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest whitespace-nowrap mr-2">Technical score</span>
-                        <span className="text-lg font-black text-slate-900 tracking-tighter">{r.scorePercent.toFixed(2)}%</span>
-                      </div>
+                      <button
+                        onClick={() => onEvaluate({ candidateName: r.candidateName, candidateEmail: r.candidateEmail, organizationId: selectedOrgId, candidateId: r.candidateId })}
+                        className={`w-full py-5 rounded-3xl font-black uppercase text-[10px] tracking-widest transition-all ${isDone ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' : 'bg-[#002b49] text-[#d4af37] shadow-xl hover:bg-[#002b49]/90'
+                          }`}
+                      >
+                        {isDone ? 'Review capability' : 'Conduct Assessment'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => onEvaluate({ candidateName: r.candidateName, candidateEmail: r.candidateEmail, organizationId: selectedOrgId })}
-                      className={`w-full py-5 rounded-3xl font-black uppercase text-[10px] tracking-widest transition-all ${isDone ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' : 'bg-[#002b49] text-[#d4af37] shadow-xl hover:bg-[#002b49]/90'
-                        }`}
-                    >
-                      {isDone ? 'Review capability' : 'Conduct Assessment'}
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           )}
 
@@ -1466,6 +1606,39 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                         </td>
                         <td className="px-8 py-5 text-right flex items-center justify-end gap-2">
                           <button
+                            onClick={() => {
+                              const result = results.find(r => r.candidateEmail === c.email);
+                              if (result) setSelectedProfile(result);
+                            }}
+                            disabled={c.status !== 'Attempted'}
+                            className={`p-2 rounded-lg transition-colors ${c.status === 'Attempted' ? 'text-[#002b49] hover:text-slate-800 hover:bg-slate-50' : 'text-slate-200 cursor-not-allowed'}`}
+                            title={c.status === 'Attempted' ? "View Analytics" : "Candidate has not attempted exam"}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                          </button>
+                          <button
+                            onClick={() => onEvaluate({ candidateName: c.fullName, candidateEmail: c.email, organizationId: selectedOrgId, candidateId: c.id })}
+                            disabled={c.status !== 'Attempted'}
+                            className={`p-2 rounded-lg transition-colors ${c.status === 'Attempted' ? 'text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50' : 'text-slate-200 cursor-not-allowed'}`}
+                            title={c.status === 'Attempted' ? "Evaluate Candidate" : "Candidate has not attempted exam"}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setNewCandidateData({ email: c.email, fullName: c.fullName });
+                              setEditingCandidateId(c.id);
+                              setIsEditingCandidate(true);
+                              setIsAddingCandidate(true);
+                            }}
+                            className="p-2 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="Edit Candidate"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                          <button
                             onClick={() => handleResetCandidate(c.id)}
                             className="p-2 text-slate-400 hover:text-[#002b49] hover:bg-slate-100 rounded-lg transition-colors"
                             title="Reset Candidate"
@@ -1510,7 +1683,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                   <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.3em]">Manage partner entities and administrators</p>
                 </div>
                 <button onClick={() => {
-                  setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '' });
+                  setNewOrgData({ id: '', name: '', adminName: '', adminEmail: '', aiLimit: 0 });
                   setIsAddingOrg(true);
                   setIsEditingOrg(false);
                 }} className="bg-[#002b49] text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
@@ -1552,6 +1725,18 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                         className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
                       />
                     </div>
+                    {currentUser?.role === 'super_admin' && (
+                      <div>
+                        <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Free AI Requests</label>
+                        <input
+                          type="number"
+                          value={newOrgData.aiLimit}
+                          onChange={e => setNewOrgData(prev => ({ ...prev, aiLimit: parseInt(e.target.value) || 0 }))}
+                          placeholder="e.g. 100"
+                          className="w-full p-4 bg-white border border-indigo-200 rounded-2xl font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-100"
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-end gap-4">
                     <button onClick={() => { setIsAddingOrg(false); setIsEditingOrg(false); }} className="px-8 py-3 text-indigo-400 font-black uppercase text-[10px] tracking-widest hover:text-indigo-600 transition-colors">Cancel</button>
@@ -1579,7 +1764,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                       <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => {
-                            setNewOrgData({ id: org.id, name: org.name, adminName: org.adminName, adminEmail: org.adminEmail });
+                            setNewOrgData({ id: org.id, name: org.name, adminName: org.adminName, adminEmail: org.adminEmail, aiLimit: org.aiLimit });
                             setIsEditingOrg(true);
                             setIsAddingOrg(true);
                           }}
@@ -1591,6 +1776,13 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                           className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Delete">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                         </button>
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex justify-between items-center">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Free AI Balance</span>
+                        <span className="text-sm font-black text-[#002b49]">{org.aiLimit} Requests</span>
                       </div>
                     </div>
 
@@ -1917,6 +2109,203 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organiza
             </div>
           )}
 
+          {/* AUDIT LOGS TAB */}
+          {activeTab === 'audit' && currentUser?.role === 'super_admin' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="bg-white rounded-[40px] p-10 shadow-xl border border-slate-100">
+                <div className="flex justify-between items-center mb-8">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Audit Trail</h2>
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">Complete activity log with IP tracking</p>
+                  </div>
+                  <button
+                    onClick={handleExportAuditLogs}
+                    className="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-green-700 transition-all flex items-center gap-2"
+                  >
+                    📊 Export CSV
+                  </button>
+                </div>
+
+                {/* Filters */}
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Event Type</label>
+                    <select
+                      value={auditFilters.eventType}
+                      onChange={e => { setAuditFilters({ ...auditFilters, eventType: e.target.value as any }); fetchAuditLogs(); }}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                    >
+                      <option value="">All Events</option>
+                      <option value="login">Login</option>
+                      <option value="logout">Logout</option>
+                      <option value="create">Create</option>
+                      <option value="update">Update</option>
+                      <option value="delete">Delete</option>
+                      <option value="reset">Reset</option>
+                      <option value="exam_submit">Exam Submit</option>
+                      <option value="eval_submit">Eval Submit</option>
+                      <option value="ai_verdict_generate">AI Verdict</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Entity Type</label>
+                    <select
+                      value={auditFilters.entityType}
+                      onChange={e => { setAuditFilters({ ...auditFilters, entityType: e.target.value as any }); fetchAuditLogs(); }}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                    >
+                      <option value="">All Entities</option>
+                      <option value="candidate">Candidate</option>
+                      <option value="question">Question</option>
+                      <option value="result">Result</option>
+                      <option value="evaluation">Evaluation</option>
+                      <option value="user">User</option>
+                      <option value="organization">Organization</option>
+                      <option value="settings">Settings</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">User Email</label>
+                    <input
+                      type="text"
+                      value={auditFilters.userEmail}
+                      onChange={e => setAuditFilters({ ...auditFilters, userEmail: e.target.value })}
+                      onBlur={fetchAuditLogs}
+                      placeholder="Filter by user..."
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Limit</label>
+                    <select
+                      value={auditFilters.limit}
+                      onChange={e => { setAuditFilters({ ...auditFilters, limit: Number(e.target.value) }); fetchAuditLogs(); }}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                    >
+                      <option value={50}>50 logs</option>
+                      <option value={100}>100 logs</option>
+                      <option value={250}>250 logs</option>
+                      <option value={500}>500 logs</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Audit Log Table */}
+                <div className="overflow-x-auto rounded-3xl border border-slate-200">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Timestamp</th>
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Event</th>
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">User</th>
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Entity</th>
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">IP Address</th>
+                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Device</th>
+                        <th className="text-center p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center p-12 text-slate-400 text-sm font-medium">
+                            No audit logs found. Events will appear here as users interact with the system.
+                          </td>
+                        </tr>
+                      ) : (
+                        auditLogs.map(log => {
+                          const deviceInfo = log.deviceInfo ? JSON.parse(log.deviceInfo || '{}') : {};
+                          const getEventColor = (eventType: string) => {
+                            switch (eventType) {
+                              case 'login': return 'bg-blue-50 text-blue-700 border-blue-200';
+                              case 'logout': return 'bg-slate-50 text-slate-600 border-slate-200';
+                              case 'create': return 'bg-green-50 text-green-700 border-green-200';
+                              case 'update': return 'bg-amber-50 text-amber-700 border-amber-200';
+                              case 'delete': return 'bg-red-50 text-red-700 border-red-200';
+                              case 'reset': return 'bg-purple-50 text-purple-700 border-purple-200';
+                              case 'exam_submit': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                              case 'eval_submit': return 'bg-pink-50 text-pink-700 border-pink-200';
+                              case 'ai_verdict_generate': return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+                              default: return 'bg-slate-50 text-slate-600 border-slate-200';
+                            }
+                          };
+
+                          return (
+                            <React.Fragment key={log.id}>
+                              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-all">
+                                <td className="p-4 text-xs font-medium text-slate-600 whitespace-nowrap">
+                                  {new Date(log.timestamp).toLocaleString()}
+                                </td>
+                                <td className="p-4">
+                                  <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${getEventColor(log.eventType)}`}>
+                                    {log.eventType}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-xs font-medium text-slate-700 max-w-[200px] truncate" title={log.userEmail || 'N/A'}>
+                                  {log.userEmail || 'System'}
+                                </td>
+                                <td className="p-4">
+                                  {log.entityType && (
+                                    <div className="text-xs">
+                                      <div className="font-bold text-slate-900">{log.entityType}</div>
+                                      {log.entityId && <div className="text-[10px] text-slate-400 font-mono truncate max-w-[150px]" title={log.entityId}>{log.entityId}</div>}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-4 text-xs font-mono text-slate-600">
+                                  {log.ipAddress || 'N/A'}
+                                </td>
+                                <td className="p-4">
+                                  {deviceInfo.browser && (
+                                    <div className="text-xs">
+                                      <div className="font-bold text-slate-900 flex items-center gap-1">
+                                        {deviceInfo.deviceType === 'desktop' && '🖥️'}
+                                        {deviceInfo.deviceType === 'mobile' && '📱'}
+                                        {deviceInfo.deviceType === 'tablet' && '📱'}
+                                        {deviceInfo.browser}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">{deviceInfo.os}</div>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-4 text-center">
+                                  {log.actionDetails && (
+                                    <button
+                                      onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-black text-slate-600 uppercase tracking-wider transition-all"
+                                    >
+                                      {expandedLogId === log.id ? 'Hide' : 'View'}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                              {expandedLogId === log.id && log.actionDetails && (
+                                <tr>
+                                  <td colSpan={7} className="p-6 bg-slate-50 border-b border-slate-200">
+                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Action Details</p>
+                                      <pre className="text-xs font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(JSON.parse(log.actionDetails), null, 2)}</pre>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-6 text-center text-xs text-slate-400 font-medium">
+                  Showing {auditLogs.length} audit log entries
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
       <ConfirmationModal
@@ -1926,6 +2315,6 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organiza
         onConfirm={confirmation.onConfirm}
         onCancel={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
       />
-    </div>
+    </div >
   );
 };

@@ -4,7 +4,7 @@ export type Difficulty = 'Easy' | 'Medium' | 'Hard';
 export type OptionKey = 'A' | 'B' | 'C' | 'D';
 
 export type Rating = 'Strong Evidence' | 'Good Evidence' | 'Limited Evidence' | 'No Evidence';
-export type EvaluationOutcome = 'Decline' | 'Progress to next stage' | 'Offer';
+export type EvaluationOutcome = 'Decline' | 'On Hold' | 'Progress to next stage' | 'Offer';
 export type AssessmentLevel = 'L4' | 'L5-L7';
 
 export interface Section {
@@ -19,6 +19,7 @@ export interface Organization {
   name: string;
   adminName: string;
   adminEmail: string;
+  aiLimit: number;
   createdBy?: string;
   createdAt?: string;
 }
@@ -146,4 +147,50 @@ export interface AppState {
   lastResult?: ExamResult | null;
   activeEvaluationCandidate?: string; // email
   currentUser?: User | null;
+  adminDashboardTab?: 'leaderboard' | 'assessments' | 'questions' | 'config' | 'organizations' | 'users' | 'candidates' | 'audit';
+}
+
+// Audit Logging Types
+export type AuditEventType =
+  | 'login'
+  | 'logout'
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'reset'
+  | 'exam_submit'
+  | 'eval_submit'
+  | 'ai_verdict_generate';
+
+export type AuditEntityType =
+  | 'candidate'
+  | 'user'
+  | 'question'
+  | 'evaluation'
+  | 'result'
+  | 'organization'
+  | 'settings'
+  | 'section';
+
+export interface DeviceInfo {
+  browser?: string;
+  browserVersion?: string;
+  os?: string;
+  osVersion?: string;
+  deviceType?: 'desktop' | 'tablet' | 'mobile';
+}
+
+export interface AuditLog {
+  id: string;
+  organizationId?: string;
+  userId?: string;
+  userEmail?: string;
+  eventType: AuditEventType;
+  entityType?: AuditEntityType;
+  entityId?: string;
+  actionDetails?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  deviceInfo?: string;
+  timestamp: string;
 }
