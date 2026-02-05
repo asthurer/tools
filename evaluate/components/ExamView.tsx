@@ -11,9 +11,9 @@ interface ExamViewProps {
   questionTimeLimitSec?: number;
 }
 
-export const ExamView: React.FC<ExamViewProps> = ({ 
-  questions, 
-  onFinish, 
+export const ExamView: React.FC<ExamViewProps> = ({
+  questions,
+  onFinish,
   onCancel,
   overallTimeLimitSec = 1200,
   questionTimeLimitSec = 60
@@ -23,7 +23,8 @@ export const ExamView: React.FC<ExamViewProps> = ({
   const [answers, setAnswers] = useState<AnswerDetail[]>([]);
   const [overallRemaining, setOverallRemaining] = useState(overallTimeLimitSec);
   const [questionRemaining, setQuestionRemaining] = useState(questionTimeLimitSec);
-  
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+
   const startTimeRef = useRef<number>(Date.now());
   const questionStartTimeRef = useRef<number>(Date.now());
 
@@ -37,16 +38,16 @@ export const ExamView: React.FC<ExamViewProps> = ({
         categories.push(q.category);
       }
     });
-    
+
     // Find current category index in the list of unique category blocks
     const currentCategory = questions[currentIndex].category;
     let sectionIdx = 0;
     let runningCategory = "";
     for (let i = 0; i <= currentIndex; i++) {
-        if (questions[i].category !== runningCategory) {
-            runningCategory = questions[i].category;
-            if (i > 0) sectionIdx++;
-        }
+      if (questions[i].category !== runningCategory) {
+        runningCategory = questions[i].category;
+        if (i > 0) sectionIdx++;
+      }
     }
 
     return {
@@ -58,7 +59,7 @@ export const ExamView: React.FC<ExamViewProps> = ({
   const handleNext = useCallback((isTimeout = false, isOverallTimeout = false) => {
     const timeSpent = Math.floor((Date.now() - questionStartTimeRef.current) / 1000);
     const status = isOverallTimeout ? 'AUTO_MISSED_OVERALL_TIMEOUT' : (isTimeout || !selectedOption ? 'MISSED' : 'ANSWERED');
-    
+
     const newAnswer: AnswerDetail = {
       questionId: currentQuestion.id,
       selectedOption: isTimeout || isOverallTimeout ? null : selectedOption,
@@ -140,7 +141,7 @@ export const ExamView: React.FC<ExamViewProps> = ({
           </div>
           <div className="flex flex-col">
             <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
-                Section {sectionMetrics.currentSection} of {sectionMetrics.totalSections}
+              Section {sectionMetrics.currentSection} of {sectionMetrics.totalSections}
             </span>
             <h1 className="text-lg font-bold text-slate-800">{currentQuestion.category}</h1>
           </div>
@@ -152,8 +153,8 @@ export const ExamView: React.FC<ExamViewProps> = ({
       </div>
 
       <div className="w-full bg-slate-200 h-2 rounded-full mb-8 overflow-hidden">
-        <div 
-          className="bg-indigo-600 h-full transition-all duration-500 ease-out" 
+        <div
+          className="bg-indigo-600 h-full transition-all duration-500 ease-out"
           style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
         />
       </div>
@@ -162,21 +163,19 @@ export const ExamView: React.FC<ExamViewProps> = ({
         <p className="text-xl font-medium text-slate-800 mb-8 leading-relaxed">
           {currentQuestion.text}
         </p>
-        
+
         <div className="grid gap-4">
           {(['A', 'B', 'C', 'D'] as OptionKey[]).map((key) => (
             <button
               key={key}
               onClick={() => setSelectedOption(key)}
-              className={`group flex items-center w-full p-4 rounded-xl border-2 transition-all duration-200 text-left ${
-                selectedOption === key 
-                ? 'border-indigo-600 bg-indigo-50/50 ring-4 ring-indigo-50' 
+              className={`group flex items-center w-full p-4 rounded-xl border-2 transition-all duration-200 text-left ${selectedOption === key
+                ? 'border-indigo-600 bg-indigo-50/50 ring-4 ring-indigo-50'
                 : 'border-slate-100 hover:border-slate-300 hover:bg-slate-50'
-              }`}
+                }`}
             >
-              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg mr-4 transition-colors ${
-                selectedOption === key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
-              }`}>
+              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg mr-4 transition-colors ${selectedOption === key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
+                }`}>
                 {key}
               </div>
               <span className={`text-lg ${selectedOption === key ? 'text-indigo-900 font-medium' : 'text-slate-700'}`}>
@@ -189,7 +188,7 @@ export const ExamView: React.FC<ExamViewProps> = ({
 
       <div className="flex justify-between items-center">
         <button
-          onClick={handleCancelClick}
+          onClick={() => setIsCancelModalOpen(true)}
           className="px-6 py-4 rounded-xl font-bold text-sm text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors"
         >
           Cancel Exam
@@ -197,15 +196,44 @@ export const ExamView: React.FC<ExamViewProps> = ({
         <button
           onClick={() => handleNext()}
           disabled={!selectedOption}
-          className={`px-10 py-4 rounded-xl font-bold text-lg transition-all transform active:scale-95 ${
-            selectedOption 
-            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700' 
+          className={`px-10 py-4 rounded-xl font-bold text-lg transition-all transform active:scale-95 ${selectedOption
+            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700'
             : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-          }`}
+            }`}
         >
           {currentIndex === questions.length - 1 ? 'Finish Exam' : 'Submit Answer & Next'}
         </button>
       </div>
+
+      {isCancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-[32px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-black">
+                !
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2 uppercase tracking-tight">Abort Session?</h3>
+              <p className="text-slate-500 font-medium text-sm leading-relaxed">
+                If you cancel now, your progress will be lost and you will <span className="text-red-600 font-bold">not be able to retake the exam</span>.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsCancelModalOpen(false)}
+                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-colors"
+              >
+                No, Continue
+              </button>
+              <button
+                onClick={onCancel}
+                className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600 shadow-lg shadow-red-200 active:scale-95 transition-all"
+              >
+                Yes, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

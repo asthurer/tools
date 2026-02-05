@@ -1,5 +1,9 @@
 
 import { createClient, SupabaseClient, Session } from '@supabase/supabase-js';
+
+// Debug Log to verify file update
+console.log("%c Evaluate.ai API Service v2.2 Loaded ", "background: #002b49; color: #d4af37; padding: 4px; border-radius: 4px; font-weight: bold");
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Question, ExamResult, InterviewEvaluation, AssessmentSettings, Section, Organization, User, UserRole, Candidate } from '../types';
 import { SUPABASE_CONFIG } from '../config';
@@ -198,6 +202,24 @@ export const apiService = {
     }
   },
 
+  async validateOrganization(name: string): Promise<string | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const normalizedName = name.trim().toLowerCase();
+      // Also check exact match on name
+      const { data, error } = await sb.from('organizations')
+        .select('id')
+        .eq('name', normalizedName)
+        .single();
+
+      if (error || !data) return null;
+      return data.id;
+    } catch (err) {
+      return null;
+    }
+  },
+
   async addOrganization(name: string, adminName: string, adminEmail: string, createdBy: string = 'system'): Promise<boolean> {
     const sb = getSupabase();
     if (!sb) return false;
@@ -356,12 +378,12 @@ export const apiService = {
     return { connected: true, tables: status };
   },
 
-  async checkEmailExists(email: string): Promise<boolean> {
+  async checkResultExists(candidateId: string): Promise<boolean> {
     const sb = getSupabase();
     if (!sb) return false;
     try {
-      const { data, error } = await sb.from('results').select('id').eq('candidate_email', email).limit(1);
-      return data && data.length > 0;
+      const { data } = await sb.from('results').select('id').eq('candidate_id', candidateId).limit(1);
+      return !!data && data.length > 0;
     } catch {
       return false;
     }
@@ -443,12 +465,13 @@ export const apiService = {
     if (!sb) return false;
     try {
       const { error } = await sb.from('results').insert([{
-        id: result.attemptId, candidate_name: result.candidateName, candidate_email: result.candidateEmail,
+        id: result.attemptId,
         started_at: result.startedAt, submitted_at: result.submittedAt, total_time_taken_sec: result.totalTimeTakenSec,
         total_questions: result.totalQuestions, attempted_count: result.attemptedCount, missed_count: result.missedCount,
         correct_count: result.correctCount, wrong_count: result.wrongCount, avg_time_per_answered_sec: result.avgTimePerAnsweredSec,
         score_percent: result.scorePercent, answers_json: JSON.parse(result.answersJson),
-        organization_id: result.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
+        organization_id: result.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883',
+        candidate_id: result.candidateId, is_deleted: 0
       }]);
       return !error;
     } catch {
@@ -519,10 +542,11 @@ export const apiService = {
     if (!sb) return false;
     try {
       const { error } = await sb.from('evaluations').insert([{
-        id: evalData.evaluationId, candidate_email: evalData.candidateEmail, interviewer_name: evalData.interviewerName,
+        id: evalData.id, interviewer_name: evalData.interviewerName,
         level: evalData.level, ratings: evalData.ratings, notes: evalData.notes, final_outcome: evalData.finalOutcome,
         final_comments: evalData.finalComments, submitted_at: evalData.submittedAt,
-        organization_id: evalData.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883'
+        organization_id: evalData.organizationId || '55147170-54ed-4fdd-840b-66f81cbc1883',
+        candidate_id: evalData.candidateId, is_deleted: 0
       }]);
       return !error;
     } catch {
@@ -530,24 +554,135 @@ export const apiService = {
     }
   },
 
+  async verifyCandidateRegistration(email: string, organizationId: string): Promise<string | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.from('candidates')
+        .select('id')
+        .eq('email', email)
+        .eq('organization_id', organizationId)
+        .single();
+
+      if (error || !data) return null;
+      return data.id;
+    } catch {
+      return null;
+    }
+  },
+
+  async updateCandidateStatus(email: string, organizationId: string, status: string): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      const { error } = await sb.from('candidates')
+        .update({ status })
+        .eq('email', email)
+        .eq('organization_id', organizationId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async getCandidateStatus(email: string, organizationId: string): Promise<string | null> {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.from('candidates')
+        .select('status')
+        .eq('email', email)
+        .eq('organization_id', organizationId)
+        .single();
+
+      if (error || !data) return null;
+      return data.status;
+    } catch {
+      return null;
+    }
+  },
+
+  async resetCandidate(candidateId: string): Promise<boolean> {
+    const sb = getSupabase();
+    if (!sb) return false;
+    try {
+      // 1. Reset Status to 'Registered' so they can take exam again
+      const { error: updateError } = await sb.from('candidates')
+        .update({ status: 'Registered' })
+        .eq('id', candidateId);
+
+      if (updateError) throw updateError;
+
+      // 2. Soft Delete Results
+      await sb.from('results')
+        .update({ is_deleted: 1 })
+        .eq('candidate_id', candidateId);
+
+      // 3. Soft Delete Evaluations
+      await sb.from('evaluations')
+        .update({ is_deleted: 1 })
+        .eq('candidate_id', candidateId);
+
+      return true;
+    } catch (err) {
+      console.error("Reset candidate failed", err);
+      return false;
+    }
+  },
+
   async getAllResults(organizationId?: string): Promise<ExamResult[]> {
     const sb = getSupabase();
     if (!sb) return [];
-    try {
-      let query = sb.from('results').select('*').order('submitted_at', { ascending: false });
+
+    const fetchResults = async (includeDeletedCheck: boolean) => {
+      // Join with candidates table to get name and email
+      let query = sb.from('results')
+        .select('*, candidates!candidate_id(full_name, email)')
+        .order('submitted_at', { ascending: false });
+
+      if (includeDeletedCheck) {
+        query = query.neq('is_deleted', 1);
+      }
       if (organizationId) {
         query = query.eq('organization_id', organizationId);
       }
-      const { data, error } = await query;
+      return await query;
+    };
+
+    try {
+      // Try with soft-delete filter
+      const { data, error } = await fetchResults(true);
       if (error) throw error;
       return (data || []).map(r => ({
-        attemptId: r.id, candidateName: r.candidate_name, candidateEmail: r.candidate_email,
+        attemptId: r.id,
+        candidateName: r.candidates?.full_name || 'Unknown',
+        candidateEmail: r.candidates?.email || 'Unknown',
         startedAt: r.started_at, submittedAt: r.submitted_at, totalTimeTakenSec: r.total_time_taken_sec,
         totalQuestions: r.total_questions, attemptedCount: r.attempted_count, missedCount: r.missed_count,
         correctCount: r.correct_count, wrongCount: r.wrong_count, avgTimePerAnsweredSec: r.avg_time_per_answered_sec,
-        scorePercent: r.score_percent, answersJson: JSON.stringify(r.answers_json)
+        scorePercent: r.score_percent, answersJson: JSON.stringify(r.answers_json),
+        organizationId: r.organization_id, candidateId: r.candidate_id
       }));
-    } catch {
+    } catch (err: any) {
+      // Fallback: If 'is_deleted' column is missing (Code 400 or Postgres 42703), fetch without filter
+      if (err.code === '42703' || err.code === '400' || err.status === 400 || err.message?.includes('is_deleted')) {
+        console.warn("Soft-delete column missing, fetching all results.");
+        try {
+          const { data } = await fetchResults(false);
+          return (data || []).map(r => ({
+            attemptId: r.id,
+            candidateName: r.candidates?.full_name || 'Unknown',
+            candidateEmail: r.candidates?.email || 'Unknown',
+            startedAt: r.started_at, submittedAt: r.submitted_at, totalTimeTakenSec: r.total_time_taken_sec,
+            totalQuestions: r.total_questions, attemptedCount: r.attempted_count, missedCount: r.missed_count,
+            correctCount: r.correct_count, wrongCount: r.wrong_count, avgTimePerAnsweredSec: r.avg_time_per_answered_sec,
+            scorePercent: r.score_percent, answersJson: JSON.stringify(r.answers_json),
+            organizationId: r.organization_id, candidateId: r.candidate_id
+          }));
+        } catch (retryErr) {
+          return [];
+        }
+      }
       return [];
     }
   },
@@ -555,20 +690,56 @@ export const apiService = {
   async getAllEvaluations(organizationId?: string): Promise<InterviewEvaluation[]> {
     const sb = getSupabase();
     if (!sb) return [];
-    try {
-      let query = sb.from('evaluations').select('*').order('submitted_at', { ascending: false });
+
+    const fetchEvals = async (includeDeletedCheck: boolean) => {
+      // Join with candidates to get email
+      let query = sb.from('evaluations')
+        .select('*, candidates!candidate_id(email, full_name)')
+        .order('submitted_at', { ascending: false });
+
+      if (includeDeletedCheck) {
+        query = query.neq('is_deleted', 1);
+      }
       if (organizationId) {
         query = query.eq('organization_id', organizationId);
       }
-      const { data, error } = await query;
+      return await query;
+    };
+
+    try {
+      const { data, error } = await fetchEvals(true);
       if (error) throw error;
+
       return (data || []).map(e => ({
-        evaluationId: e.id, candidateEmail: e.candidate_email, interviewerName: e.interviewer_name,
+        id: e.id,
+        candidateEmail: e.candidates?.email || 'Unknown',
+        candidateName: e.candidates?.full_name,
+        interviewerName: e.interviewer_name,
         level: e.level, ratings: e.ratings, notes: e.notes, finalOutcome: e.final_outcome,
         finalComments: e.final_comments, submittedAt: e.submitted_at,
+        organizationId: e.organization_id,
         aiVerdict: e.notes?.['_AI_VERDICT'] ? JSON.parse(e.notes['_AI_VERDICT']) : undefined
       }));
-    } catch {
+    } catch (err: any) {
+      // Fallback for missing column
+      if (err.code === '42703' || err.code === '400' || err.status === 400 || err.message?.includes('is_deleted')) {
+        console.warn("Soft-delete column missing, fetching all evaluations.");
+        try {
+          const { data } = await fetchEvals(false);
+          return (data || []).map(e => ({
+            id: e.id,
+            candidateEmail: e.candidates?.email || 'Unknown',
+            candidateName: e.candidates?.full_name,
+            interviewerName: e.interviewer_name,
+            level: e.level, ratings: e.ratings, notes: e.notes, finalOutcome: e.final_outcome,
+            finalComments: e.final_comments, submittedAt: e.submitted_at,
+            organizationId: e.organization_id,
+            aiVerdict: e.notes?.['_AI_VERDICT'] ? JSON.parse(e.notes['_AI_VERDICT']) : undefined
+          }));
+        } catch {
+          return [];
+        }
+      }
       return [];
     }
   },

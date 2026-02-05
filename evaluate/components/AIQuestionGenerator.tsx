@@ -39,7 +39,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
       const prompt = `Generate exactly 5 distinct and professional multiple-choice questions for a corporate technical assessment.
           Category: ${finalCategory}
           Difficulty Level: ${difficulty}
-          Context: Data Operations, Analytics, and Engineering roles. Ensure options are plausible but only one is clearly correct.
+          Context: Evaluate.ai, Analytics, and Engineering roles. Ensure options are plausible but only one is clearly correct.
           
           Return the response as a valid JSON array of objects with the following structure:
           [

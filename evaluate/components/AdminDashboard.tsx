@@ -7,12 +7,14 @@ import { SUPABASE_CONFIG } from '../config';
 import { AIQuestionGenerator } from './AIQuestionGenerator';
 
 interface Props {
-  onEvaluate: (candidate: { candidateName: string, candidateEmail: string }) => void;
+  onEvaluate: (candidate: { candidateName: string, candidateEmail: string, organizationId?: string, candidateId: string }) => void;
   onLogout?: () => void;
   currentUser?: User | null;
+  selectedOrgId?: string;
+  onOrganizationSelect?: (id: string) => void;
 }
 
-export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentUser }) => {
+export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentUser, selectedOrgId: propSelectedOrgId, onOrganizationSelect }) => {
   const [results, setResults] = useState<ExamResult[]>([]);
   const [evaluations, setEvaluations] = useState<InterviewEvaluation[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -28,13 +30,29 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   const [isAddingOrg, setIsAddingOrg] = useState(false);
 
   const [isEditingOrg, setIsEditingOrg] = useState(false);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | undefined>(currentUser?.organizationId);
+
+  // Internal state for non-lifted scenarios, or local override check
+  // However, since we now lift state, we should rely on the prop if provided.
+  // We'll use a derived value or a local state that syncs.
+  const [localSelectedOrgId, setLocalSelectedOrgId] = useState<string | undefined>(currentUser?.organizationId);
+
+  // Use the prop if passed, otherwise fall back to local (backward compatibility/stand-alone)
+  const selectedOrgId = propSelectedOrgId !== undefined ? propSelectedOrgId : localSelectedOrgId;
+
+  const handleOrgChange = (newId: string) => {
+    if (onOrganizationSelect) {
+      onOrganizationSelect(newId);
+    } else {
+      setLocalSelectedOrgId(newId);
+    }
+  };
 
   useEffect(() => {
-    if (currentUser?.organizationId && !selectedOrgId) {
-      setSelectedOrgId(currentUser.organizationId);
+    // If not controlled, and we just loaded a user, set the default
+    if (!onOrganizationSelect && currentUser?.organizationId && !localSelectedOrgId) {
+      setLocalSelectedOrgId(currentUser.organizationId);
     }
-  }, [currentUser]);
+  }, [currentUser, onOrganizationSelect, localSelectedOrgId]);
 
   const [newUserData, setNewUserData] = useState<{ id: string, email: string, fullName: string, role: UserRole }>({ id: '', email: '', fullName: '', role: 'admin' });
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -52,6 +70,22 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   const [showAIGenerator, setShowAIGenerator] = useState(false);
   const [viewingComment, setViewingComment] = useState<{ title: string, comment: string } | null>(null);
   const [generatingVerdict, setGeneratingVerdict] = useState(false);
+
+  const [confirmation, setConfirmation] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void; }>({
+    isOpen: false, title: '', message: '', onConfirm: () => { }
+  });
+
+  const requestConfirmation = (title: string, message: string, action: () => void) => {
+    setConfirmation({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: () => {
+        action();
+        setConfirmation(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
 
   const [assessmentSettings, setAssessmentSettings] = useState<AssessmentSettings>({
     overallTimeLimitMins: OVERALL_TIME_LIMIT_SEC / 60,
@@ -219,30 +253,32 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   };
 
   const handleDeleteQuestion = async (id: string) => {
-    if (!window.confirm("Delete this question permanently?")) return;
-    const success = await apiService.deleteQuestion(id);
-    if (success) {
-      fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
-      fetchAllQuestionsForLookup();
-      setSyncMessage({ text: "Question deleted.", type: 'success' });
-    } else {
-      setSyncMessage({ text: "Deletion failed.", type: 'error' });
-    }
-    setTimeout(() => setSyncMessage(null), 3000);
+    requestConfirmation("Delete Question?", "This action cannot be undone. The question will be permanently removed.", async () => {
+      const success = await apiService.deleteQuestion(id);
+      if (success) {
+        fetchQuestions(currentPage, pageSize, filterCategory, searchQuery);
+        fetchAllQuestionsForLookup();
+        setSyncMessage({ text: "Question deleted.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Deletion failed.", type: 'error' });
+      }
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
   };
 
   const handleDeleteResult = async (id: string) => {
-    if (!window.confirm("Permanently delete this candidate's record? This action cannot be undone.")) return;
-    setLoading(true);
-    const success = await apiService.deleteResult(id);
-    if (success) {
-      await fetchData();
-      setSyncMessage({ text: "Record purged successfully.", type: 'success' });
-    } else {
-      setSyncMessage({ text: "Purge failed. Verify permissions.", type: 'error' });
-    }
-    setLoading(false);
-    setTimeout(() => setSyncMessage(null), 3000);
+    requestConfirmation("Purge Result?", "This will permanently delete the candidate's exam record. This cannot be undone.", async () => {
+      setLoading(true);
+      const success = await apiService.deleteResult(id);
+      if (success) {
+        await fetchData();
+        setSyncMessage({ text: "Record purged successfully.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Purge failed. Verify permissions.", type: 'error' });
+      }
+      setLoading(false);
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
   };
 
   const getRatingColor = (rating: Rating) => {
@@ -321,18 +357,19 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   };
 
   const handleDeleteOrganization = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this organization? This action cannot be undone.")) return;
-    setLoading(true);
-    const success = await apiService.deleteOrganization(id);
-    setLoading(false);
+    requestConfirmation("Delete Organization?", "Are you sure? This will remove the organization and could affect associated data.", async () => {
+      setLoading(true);
+      const success = await apiService.deleteOrganization(id);
+      setLoading(false);
 
-    if (success) {
-      fetchOrganizations();
-      setSyncMessage({ text: "Organization deleted.", type: 'success' });
-    } else {
-      setSyncMessage({ text: "Failed to delete organization.", type: 'error' });
-    }
-    setTimeout(() => setSyncMessage(null), 3000);
+      if (success) {
+        fetchOrganizations();
+        setSyncMessage({ text: "Organization deleted.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Failed to delete organization.", type: 'error' });
+      }
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
   };
 
   const handleAddOrganization = async () => {
@@ -408,17 +445,18 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   };
 
   const handleDeleteUser = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
-    setLoading(true);
-    const success = await apiService.deleteUser(id);
-    setLoading(false);
-    if (success) {
-      fetchUsers();
-      setSyncMessage({ text: "User deleted.", type: 'success' });
-    } else {
-      setSyncMessage({ text: "Failed to delete user.", type: 'error' });
-    }
-    setTimeout(() => setSyncMessage(null), 3000);
+    requestConfirmation("Delete User?", "This user will lose access immediately. Proceed?", async () => {
+      setLoading(true);
+      const success = await apiService.deleteUser(id);
+      setLoading(false);
+      if (success) {
+        fetchUsers();
+        setSyncMessage({ text: "User deleted.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Failed to delete user.", type: 'error' });
+      }
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
   };
 
   const handleAddCandidate = async () => {
@@ -444,18 +482,34 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
     setTimeout(() => setSyncMessage(null), 3000);
   };
 
+  const handleResetCandidate = async (id: string) => {
+    requestConfirmation("Reset Candidate?", "This will archive their previous attempts and allow them to take the exam again.", async () => {
+      setLoading(true);
+      const success = await apiService.resetCandidate(id);
+      if (success) {
+        fetchCandidates();
+        setSyncMessage({ text: "Candidate reset successfully.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Reset failed.", type: 'error' });
+      }
+      setLoading(false);
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
+  };
+
   const handleDeleteCandidate = async (id: string) => {
-    if (!window.confirm("Delete this candidate?")) return;
-    setLoading(true);
-    const success = await apiService.deleteCandidate(id);
-    setLoading(false);
-    if (success) {
-      fetchCandidates();
-      setSyncMessage({ text: "Candidate deleted.", type: 'success' });
-    } else {
-      setSyncMessage({ text: "Failed to delete candidate.", type: 'error' });
-    }
-    setTimeout(() => setSyncMessage(null), 3000);
+    requestConfirmation("Delete Candidate?", "This will verify remove the candidate from the registry.", async () => {
+      setLoading(true);
+      const success = await apiService.deleteCandidate(id);
+      setLoading(false);
+      if (success) {
+        fetchCandidates();
+        setSyncMessage({ text: "Candidate deleted.", type: 'success' });
+      } else {
+        setSyncMessage({ text: "Failed to delete candidate.", type: 'error' });
+      }
+      setTimeout(() => setSyncMessage(null), 3000);
+    });
   };
 
   const totalPages = Math.ceil(totalQuestionsCount / pageSize);
@@ -533,6 +587,35 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
       </div>
     </div>
   );
+
+  const ConfirmationModal = ({ isOpen, title, message, onConfirm, onCancel }: { isOpen: boolean, title: string, message: string, onConfirm: () => void, onCancel: () => void }) => {
+    if (!isOpen) return null;
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl border border-slate-100 scale-100 animate-in zoom-in-95 duration-200">
+          <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-6">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+          </div>
+          <h3 className="text-xl font-black text-slate-900 mb-2 uppercase tracking-tight">{title}</h3>
+          <p className="text-slate-500 text-sm font-medium leading-relaxed mb-8">{message}</p>
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              className="flex-1 py-3 bg-[#002b49] hover:bg-[#003b5c] text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-[#002b49]/20"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const QuestionModal = ({ question, onClose, onSave }: { question: Partial<Question>, onClose: () => void, onSave: (q: Question) => void }) => {
     const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
@@ -992,7 +1075,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                 onClick={() => {
                   const n = (document.getElementById('mName') as HTMLInputElement).value;
                   const e = (document.getElementById('mEmail') as HTMLInputElement).value;
-                  if (n && e) onEvaluate({ candidateName: n, candidateEmail: e });
+                  if (n && e) onEvaluate({ candidateName: n, candidateEmail: e, organizationId: selectedOrgId });
                   setShowManualModal(false);
                 }}
                 className="w-full bg-[#002b49] text-white py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg"
@@ -1063,7 +1146,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
               <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Context:</span>
               <select
                 value={selectedOrgId || ''}
-                onChange={(e) => setSelectedOrgId(e.target.value)}
+                onChange={(e) => handleOrgChange(e.target.value)}
                 className="bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 py-1 px-3 outline-none focus:ring-2 focus:ring-indigo-100"
               >
                 <option value="">Select Organization</option>
@@ -1110,7 +1193,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
             className={`px-2 py-4 font-black text-[10px] uppercase tracking-[0.2em] transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#002b49] text-[#002b49]' : 'border-transparent text-slate-300 hover:text-slate-400'
               }`}
           >
-            {tab === 'questions' ? '📋 Question Bank' : tab === 'assessments' ? '⭐ Toolkits' : tab === 'candidates' ? '👥 Candidates' : tab}
+            {tab === 'questions' ? '📋 Question Bank' : tab === 'assessments' ? '⭐ Evaluate' : tab === 'candidates' ? '👥 Candidates' : tab}
           </button>
         ))}
 
@@ -1227,7 +1310,7 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                       </div>
                     </div>
                     <button
-                      onClick={() => onEvaluate({ candidateName: r.candidateName, candidateEmail: r.candidateEmail })}
+                      onClick={() => onEvaluate({ candidateName: r.candidateName, candidateEmail: r.candidateEmail, organizationId: selectedOrgId })}
                       className={`w-full py-5 rounded-3xl font-black uppercase text-[10px] tracking-widest transition-all ${isDone ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' : 'bg-[#002b49] text-[#d4af37] shadow-xl hover:bg-[#002b49]/90'
                         }`}
                     >
@@ -1371,17 +1454,34 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                         <td className="px-8 py-5 font-bold text-sm text-slate-700">{c.fullName}</td>
                         <td className="px-8 py-5 font-medium text-xs text-slate-500">{c.email}</td>
                         <td className="px-8 py-5">
-                          <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-[8px] font-black uppercase tracking-wide border border-green-100">{c.status}</span>
+                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-wide border ${c.status === 'Opted Out' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                            (c.status === 'Registered' || c.status === 'Re-registered') ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                              'bg-green-50 text-green-700 border-green-100'
+                            }`}>
+                            {c.status}
+                          </span>
                         </td>
                         <td className="px-8 py-5 text-[10px] text-slate-400">
                           {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
                         </td>
-                        <td className="px-8 py-5 text-right">
+                        <td className="px-8 py-5 text-right flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleResetCandidate(c.id)}
+                            className="p-2 text-slate-400 hover:text-[#002b49] hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Reset Candidate"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          </button>
                           <button
                             onClick={() => handleDeleteCandidate(c.id)}
-                            className="text-red-400 hover:text-red-600 transition-colors"
+                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Remove Candidate"
                           >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
                           </button>
                         </td>
                       </tr>
@@ -1819,6 +1919,13 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organiza
 
         </div>
       )}
+      <ConfirmationModal
+        isOpen={confirmation.isOpen}
+        title={confirmation.title}
+        message={confirmation.message}
+        onConfirm={confirmation.onConfirm}
+        onCancel={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

@@ -29,7 +29,9 @@ const App: React.FC = () => {
     questionsPerSection: {}
   });
 
-  const [evalCandidate, setEvalCandidate] = useState<{ name: string, email: string } | null>(null);
+  const [selectedDashboardOrgId, setSelectedDashboardOrgId] = useState<string | undefined>(undefined);
+
+  const [evalCandidate, setEvalCandidate] = useState<{ name: string, email: string, organizationId?: string, id?: string } | null>(null);
 
   useEffect(() => {
     const initApp = async () => {
@@ -59,29 +61,57 @@ const App: React.FC = () => {
   const handleStartExam = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const name = formData.get('name') as string;
     const email = formData.get('email') as string;
+    const orgDomain = formData.get('orgDomain') as string;
+    const name = email ? email.split('@')[0] : 'Candidate'; // Fallback for local state
 
-    if (!name || !email) {
-      setError("Identification required: Name and Email.");
+    if (!email) {
+      setError("Identification required: Email.");
+      return;
+    }
+
+    if (!orgDomain) {
+      setError("Organization ID is required.");
       return;
     }
 
     try {
-      const emailExists = await apiService.checkEmailExists(email);
-      if (emailExists) {
+      // Validate Organization
+      const validOrgId = await apiService.validateOrganization(orgDomain);
+      if (!validOrgId) {
+        setError("Invalid organization domain. Please verify your credentials.");
+        return;
+      }
+
+      // Verify Candidate Registration
+      const candidateId = await apiService.verifyCandidateRegistration(email, validOrgId);
+      if (!candidateId) {
+        setError("You are not a registered candidate. Contact the HR to register for evaluation.");
+        return;
+      }
+
+      // Check content status (e.g. Opted Out)
+      const currentStatus = await apiService.getCandidateStatus(email, validOrgId);
+      if (currentStatus === 'Opted Out') {
+        setError("You opted out of exam by clicking cancel button. Contact HR to retake exam.");
+        return;
+      }
+
+      const hasExistingResult = await apiService.checkResultExists(candidateId);
+      if (hasExistingResult) {
         setError("Results are awaited, please contact the interview SPOC");
         return;
       }
 
-      const allQuestionsResult = await apiService.getQuestions(true, 1, 1000);
+      // Fetch questions scoped to this organization
+      const allQuestionsResult = await apiService.getQuestions(true, 1, 1000, '', '', validOrgId);
       if (!allQuestionsResult || allQuestionsResult.data.length === 0) {
-        throw new Error("Critical failure: Assessment bank is empty or unavailable.");
+        throw new Error("Critical failure: Assessment bank is empty or unavailable for this organization.");
       }
 
       const allQuestionsPool = allQuestionsResult.data;
       let finalExamQuestions: Question[] = [];
-      const config = assessmentSettings.questionsPerSection;
+      const config = assessmentSettings.questionsPerSection; // Note: Settings should ideally also be org-scoped
 
       // We process categories in a fixed order (or based on config keys)
       // and build the list strictly section-by-section.
@@ -116,61 +146,85 @@ const App: React.FC = () => {
       // Note: We DO NOT shuffle the finalExamQuestions array here, 
       // because we want them to remain in their category sequences.
 
-      setState({
-        view: 'exam',
-        candidate: { name, email },
-        currentAttempt: {
-          id: `att_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          questions: finalExamQuestions,
-          currentIndex: 0,
-          answers: [],
-          startTime: Date.now(),
-          overallTimer: assessmentSettings.overallTimeLimitMins * 60,
-          questionTimer: assessmentSettings.questionTimeLimitSecs
-        }
-      });
+      setState(prev => ({
+        ...prev,
+        candidate: { name, email, organizationId: validOrgId, id: candidateId },
+        currentAttempt: { questions: finalExamQuestions, answers: [], startTime: Date.now(), overallTimer: assessmentSettings.overallTimeLimitMins * 60, questionTimer: assessmentSettings.questionTimeLimitSecs, id: `attempt_${Date.now()}`, currentIndex: 0 },
+        view: 'exam'
+      }));
       setError(null);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to initialize assessment. Contact IT support.");
+      setError(err.message || "Initialization failed");
     }
   };
 
-  const handleExamFinish = async (answers: AnswerDetail[], totalTimeSec: number) => {
+  const handleExamComplete = async (answers: AnswerDetail[], totalTimeTakenSec: number) => {
     if (!state.candidate) return;
-    const currentTotal = answers.length; // Use actual length of generated test
-    const attemptedCount = answers.filter(a => a.status === 'ANSWERED').length;
-    const correctCount = answers.filter(a => a.isCorrect).length;
 
-    const result: ExamResult = {
-      attemptId: state.currentAttempt?.id || 'unknown',
-      candidateName: state.candidate.name,
-      candidateEmail: state.candidate.email,
-      startedAt: new Date(state.currentAttempt?.startTime || Date.now()).toISOString(),
-      submittedAt: new Date().toISOString(),
-      totalTimeTakenSec: totalTimeSec,
-      totalQuestions: currentTotal,
-      attemptedCount,
-      missedCount: currentTotal - attemptedCount,
-      correctCount,
-      wrongCount: attemptedCount - correctCount,
-      avgTimePerAnsweredSec: attemptedCount > 0 ? answers.reduce((acc, c) => acc + c.timeSpentSec, 0) / attemptedCount : 0,
-      scorePercent: (correctCount / currentTotal) * 100,
-      answersJson: JSON.stringify(answers)
-    };
+    try {
+      const currentTotal = answers.length;
+      const attemptedCount = answers.filter(a => a.status === 'ANSWERED').length;
+      const answeredCorrectly = answers.filter(a => a.status === 'ANSWERED' && a.isCorrect).length;
+      const answeredWrong = answers.filter(a => a.status === 'ANSWERED' && !a.isCorrect).length;
+      // Missed includes explicitly missed (status: MISSED) or auto-missed due to timeout
+      const missedCount = answers.filter(a => a.status !== 'ANSWERED').length;
 
-    setState(prev => ({ ...prev, view: 'completion', currentAttempt: null, lastResult: result }));
-    await apiService.submitResult(result);
+      const scorePercent = currentTotal > 0 ? (answeredCorrectly / currentTotal) * 100 : 0;
+      const avgTimePerAnsweredSec = attemptedCount > 0 ? totalTimeTakenSec / attemptedCount : 0;
+
+      const result: ExamResult = {
+        attemptId: `attempt_${Date.now()}`,
+        candidateName: state.candidate.name,
+        candidateEmail: state.candidate.email,
+        startedAt: new Date(state.currentAttempt?.startTime || Date.now()).toISOString(),
+        submittedAt: new Date().toISOString(),
+        totalTimeTakenSec,
+        totalQuestions: currentTotal,
+        attemptedCount,
+        missedCount,
+        correctCount: answeredCorrectly,
+        wrongCount: answeredWrong,
+        avgTimePerAnsweredSec,
+        scorePercent,
+        answersJson: JSON.stringify(answers),
+        organizationId: state.currentUser?.organizationId,
+        candidateId: state.candidate.id
+      };
+
+      await apiService.submitResult(result);
+      if (state.candidate && state.candidate.organizationId) {
+        await apiService.updateCandidateStatus(state.candidate.email, state.candidate.organizationId, 'Attempted');
+      }
+      setState(prev => ({ ...prev, view: 'completion', lastResult: result }));
+    } catch (err) {
+      console.error("Submission error:", err);
+      setError("Failed to transmit results. Connectivity issue likely.");
+    }
   };
 
-  const handleExamCancel = () => {
+  const handleExamCancel = async () => {
+    if (state.candidate && state.candidate.organizationId) {
+      // Mark candidate as Opted Out
+      await apiService.updateCandidateStatus(state.candidate.email, state.candidate.organizationId, 'Opted Out');
+    }
     setState({ view: 'landing', candidate: null, currentAttempt: null, lastResult: null });
   };
 
   const handleEvaluationSubmit = async (evaluation: InterviewEvaluation) => {
-    await apiService.submitInterviewEvaluation(evaluation);
-    setEvalCandidate(null);
-    setState(prev => ({ ...prev, view: 'admin' }));
+    // If we have a specific organization context for this evaluation, use it
+    // Otherwise fall back to current user's org (though the evaluation object itself should have it from props)
+    const success = await apiService.submitInterviewEvaluation({
+      ...evaluation,
+      organizationId: evalCandidate?.organizationId || state.currentUser?.organizationId,
+      candidateId: evalCandidate?.id
+    });
+
+    if (success) {
+      setEvalCandidate(null);
+      setState(prev => ({ ...prev, view: 'admin' }));
+    } else {
+      alert("Failed to save evaluation record.");
+    }
   };
 
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -178,14 +232,14 @@ const App: React.FC = () => {
     setIsLoggingIn(true);
     setAdminError(null);
     try {
-      await apiService.signIn(adminEmail, adminPassword);
-      const userProfile = await apiService.getUserProfile(adminEmail);
+      const { user } = await apiService.signIn(adminEmail, adminPassword);
+      if (!user) throw new Error('Authentication failed');
+
+      const userProfile = await apiService.getUserProfile(user.email || '');
       setState(prev => ({ ...prev, view: 'admin', currentUser: userProfile }));
       setIsAdminAuthVisible(false);
-      setAdminEmail('');
-      setAdminPassword('');
     } catch (err: any) {
-      setAdminError(err.message || "Invalid credentials.");
+      setAdminError("Access denied. Credentials invalid.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -193,109 +247,150 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await apiService.signOut();
-    setState({ view: 'landing', candidate: null, currentAttempt: null, lastResult: null });
+    setState(prev => ({ ...prev, view: 'landing', currentUser: null }));
+    setIsAdminAuthVisible(false);
+    setAdminEmail('');
+    setAdminPassword('');
+    setSelectedDashboardOrgId(undefined);
   };
 
+  if (state.view === 'exam' && state.candidate && state.currentAttempt) {
+    return (
+      <ExamView
+        questions={state.currentAttempt.questions}
+        overallTimeLimitSec={assessmentSettings.overallTimeLimitMins * 60}
+        questionTimeLimitSec={assessmentSettings.questionTimeLimitSecs}
+        onFinish={handleExamComplete}
+        onCancel={handleExamCancel}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen font-sans text-slate-900 selection:bg-[#d4af37] selection:text-[#002b49]">
       {state.view === 'landing' && (
-        <div className="flex flex-col items-center justify-center min-h-screen px-4">
-          <div className="w-full max-w-md bg-white rounded-[48px] shadow-2xl border border-slate-100 p-12">
+        <div className="flex flex-col items-center justify-center min-h-screen relative overflow-hidden bg-slate-50">
+          {/* Background decorative elements */}
+          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-gradient-to-bl from-[#002b49]/5 to-transparent rounded-full -translate-y/2 translate-x-1/2 blur-3xl pointer-events-none"></div>
+          <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-gradient-to-tr from-[#d4af37]/5 to-transparent rounded-full translate-y/2 -translate-x-1/2 blur-3xl pointer-events-none"></div>
+
+          <div className="w-full max-w-md p-8 relative z-10">
             <div className="text-center mb-12">
-              <h1 className="text-5xl font-black text-[#002b49] uppercase tracking-tighter leading-none mb-3">Assessment<br />Gateway</h1>
-              <div className="w-16 h-1 bg-[#d4af37] mx-auto"></div>
+              <div className="w-20 h-20 bg-[#002b49] text-white rounded-[32px] flex items-center justify-center text-3xl font-black mb-6 mx-auto shadow-2xl shadow-[#002b49]/20 transform -rotate-6">
+                E
+              </div>
+              <h1 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter uppercase leading-none">Evaluate<span className="text-[#002b49]">.ai</span></h1>
+              <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px]">Next-Gen Leadership Assessment Protocol</p>
             </div>
 
-            <form onSubmit={handleStartExam} className="space-y-8">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] mb-3 block">Name</label>
-                <input
-                  name="name"
-                  required
-                  placeholder="Full Legal Name"
-                  className="w-full p-6 border-2 border-slate-200 bg-white text-slate-900 font-bold rounded-3xl focus:ring-8 focus:ring-indigo-50/50 outline-none transition-all placeholder-slate-300 shadow-sm"
-                />
+            {isAdminAuthVisible ? (
+              <form onSubmit={handleAdminLogin} className="bg-white p-8 rounded-[40px] shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-300">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">System Access</h2>
+                  <button type="button" onClick={() => setIsAdminAuthVisible(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest">Back</button>
+                </div>
+
+                {adminError && (
+                  <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold uppercase tracking-wide rounded-r-xl">
+                    {adminError}
+                  </div>
+                )}
+
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 tracking-widest mb-2 ml-1">Admin ID</label>
+                    <input
+                      type="email"
+                      value={adminEmail}
+                      onChange={e => setAdminEmail(e.target.value)}
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-[#002b49]/5 focus:border-[#002b49]/20 transition-all font-bold text-slate-700 placeholder:text-slate-300 pointer-events-auto"
+                      placeholder="admin@company.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 tracking-widest mb-2 ml-1">Secure Key</label>
+                    <input
+                      type="password"
+                      value={adminPassword}
+                      onChange={e => setAdminPassword(e.target.value)}
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-[#002b49]/5 focus:border-[#002b49]/20 transition-all font-bold text-slate-700 placeholder:text-slate-300 pointer-events-auto"
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn}
+                    className="w-full bg-[#002b49] text-white py-5 rounded-2xl font-black uppercase tracking-widest text-[11px] hover:bg-slate-800 active:scale-[0.98] transition-all shadow-xl shadow-[#002b49]/20 disabled:opacity-70 disabled:cursor-wait mt-2"
+                  >
+                    {isLoggingIn ? 'Authenticating...' : 'Enter Console'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
+                <form onSubmit={handleStartExam} className="bg-white p-8 rounded-[40px] shadow-2xl border border-slate-100">
+                  <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-8">Candidate Entry</h2>
+                  {error && (
+                    <div className="mb-6 p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-700 text-xs font-bold uppercase tracking-wide rounded-r-xl">
+                      {error}
+                    </div>
+                  )}
+
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-[10px] uppercase font-black text-slate-400 tracking-widest mb-2 ml-1">Organization ID</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          name="orgDomain"
+                          className="flex-1 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-[#002b49]/5 focus:border-[#002b49]/20 transition-all font-bold text-slate-900 placeholder:text-slate-400 pointer-events-auto text-right min-w-0"
+                          placeholder="company-name"
+                          autoComplete="off"
+                        />
+                        <div className="px-5 py-4 bg-slate-100 border border-slate-100 rounded-2xl font-bold text-slate-500 select-none whitespace-nowrap">
+                          .evaluate.ai
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-black text-slate-400 tracking-widest mb-2 ml-1">Official Email</label>
+                      <input
+                        name="email"
+                        type="email"
+                        className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-[#002b49]/5 focus:border-[#002b49]/20 transition-all font-bold text-slate-700 placeholder:text-slate-300 pointer-events-auto"
+                        placeholder="jane@company.com"
+                        required
+                        autoComplete="off"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full bg-[#002b49] text-white py-5 rounded-2xl font-black uppercase tracking-widest text-[11px] hover:bg-slate-800 active:scale-[0.98] transition-all shadow-xl shadow-[#002b49]/20 mt-2"
+                    >
+                      Initialize Session
+                    </button>
+
+                  </div>
+                </form>
+
+                <div className="text-center">
+                  <button
+                    onClick={() => setIsAdminAuthVisible(true)}
+                    className="text-slate-300 hover:text-[#002b49] font-black uppercase tracking-[0.2em] text-[9px] transition-colors py-2 px-4"
+                  >
+                    System Administrator Access
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] mb-3 block">Official Email</label>
-                <input
-                  name="email"
-                  required
-                  type="email"
-                  placeholder="corporate@domain.com"
-                  className="w-full p-6 border-2 border-slate-200 bg-white text-slate-900 font-bold rounded-3xl focus:ring-8 focus:ring-indigo-50/50 outline-none transition-all placeholder-slate-300 shadow-sm"
-                />
-              </div>
+            )}
+          </div>
 
-              {error && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest bg-red-50 p-5 rounded-2xl border border-red-100 leading-relaxed text-center">{error}</p>}
-
-              <button type="submit" className="w-full bg-[#002b49] text-white font-black uppercase tracking-[0.3em] text-[11px] py-6 rounded-3xl shadow-2xl shadow-indigo-100 hover:scale-[1.03] active:scale-95 transition-all">Launch</button>
-            </form>
-
-            <div className="mt-14 flex flex-col items-center">
-              <div className="w-full h-2 bg-[#f8e100] mb-2 rounded-full transform -rotate-1 opacity-90"></div>
-              <button onClick={() => setIsAdminAuthVisible(true)} className="w-full text-slate-500 text-[9px] font-black uppercase tracking-[0.5em] hover:text-[#002b49] transition-colors">Operational Management</button>
-            </div>
+          <div className="absolute bottom-6 font-black uppercase text-[9px] text-slate-300 tracking-[0.5em] opacity-40 selection:bg-transparent cursor-default">
+            Restricted Access Protocol • v2.4.0
           </div>
         </div>
-      )}
-
-      {isAdminAuthVisible && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl">
-          <div className="w-full max-w-sm bg-white rounded-[56px] p-12 shadow-2xl">
-            <h2 className="text-3xl font-black mb-8 uppercase tracking-widest text-slate-900 leading-none text-center">Admin<br />Login</h2>
-            <form onSubmit={handleAdminLogin} className="space-y-6">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 block">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={adminEmail}
-                  onChange={e => setAdminEmail(e.target.value)}
-                  className="w-full p-4 border-2 border-slate-100 bg-white rounded-2xl outline-none focus:border-[#002b49] font-bold"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 block">Password</label>
-                <input
-                  type="password"
-                  required
-                  value={adminPassword}
-                  onChange={e => setAdminPassword(e.target.value)}
-                  className="w-full p-4 border-2 border-slate-100 bg-white rounded-2xl outline-none focus:border-[#002b49] font-bold"
-                />
-              </div>
-              {adminError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest text-center">{adminError}</p>}
-              <button
-                type="submit"
-                disabled={isLoggingIn}
-                className="w-full bg-[#002b49] text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-[0.3em] shadow-lg disabled:opacity-50"
-              >
-                {isLoggingIn ? 'Authenticating...' : 'Authorize'}
-              </button>
-            </form>
-
-            <div className="mt-8 flex flex-col items-center">
-              <div className="w-full h-2 bg-red-500 mb-2 rounded-full transform -rotate-1 opacity-90"></div>
-              <button
-                onClick={() => setIsAdminAuthVisible(false)}
-                className="w-full text-slate-400 text-[10px] font-black uppercase tracking-[0.4em] hover:text-red-600 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {state.view === 'exam' && state.currentAttempt && (
-        <ExamView
-          questions={state.currentAttempt.questions}
-          onFinish={handleExamFinish}
-          onCancel={handleExamCancel}
-          overallTimeLimitSec={state.currentAttempt.overallTimer}
-          questionTimeLimitSec={state.currentAttempt.questionTimer}
-        />
       )}
 
       {state.view === 'completion' && (
@@ -336,11 +431,13 @@ const App: React.FC = () => {
       {state.view === 'admin' && (
         <AdminDashboard
           onEvaluate={(c) => {
-            setEvalCandidate({ name: c.candidateName, email: c.candidateEmail });
+            setEvalCandidate({ name: c.candidateName, email: c.candidateEmail, organizationId: c.organizationId, id: c.candidateId });
             setState(prev => ({ ...prev, view: 'interviewer-form' }));
           }}
           onLogout={handleLogout}
           currentUser={state.currentUser}
+          selectedOrgId={state.currentUser?.role === 'super_admin' ? (selectedDashboardOrgId || state.currentUser?.organizationId) : state.currentUser?.organizationId}
+          onOrganizationSelect={state.currentUser?.role === 'super_admin' ? setSelectedDashboardOrgId : undefined}
         />
       )}
 
@@ -348,7 +445,8 @@ const App: React.FC = () => {
         <InterviewEvaluationView
           candidateName={evalCandidate.name}
           candidateEmail={evalCandidate.email}
-          organizationId={state.currentUser?.organizationId}
+          candidateId={evalCandidate.id}
+          organizationId={evalCandidate.organizationId || state.currentUser?.organizationId}
           onClose={() => {
             setEvalCandidate(null);
             setState(prev => ({ ...prev, view: 'admin' }));

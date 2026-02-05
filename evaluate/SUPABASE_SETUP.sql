@@ -1,5 +1,5 @@
 -- setup.sql
--- Subapase Schema DDL for Data Operations Portal
+-- Subapase Schema DDL for Evaluate.ai - Next-Gen Leadership Assessment Protocol
 
 -- 1. ORGANIZATIONS TABLE
 CREATE TABLE IF NOT EXISTS organizations (
@@ -40,8 +40,7 @@ CREATE TABLE IF NOT EXISTS questions (
 CREATE TABLE IF NOT EXISTS results (
   id TEXT PRIMARY KEY,
   organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c',
-  candidate_name TEXT NOT NULL,
-  candidate_email TEXT NOT NULL,
+  candidate_id UUID,
   started_at TIMESTAMPTZ NOT NULL,
   submitted_at TIMESTAMPTZ NOT NULL,
   total_time_taken_sec INTEGER NOT NULL,
@@ -53,6 +52,7 @@ CREATE TABLE IF NOT EXISTS results (
   avg_time_per_answered_sec DECIMAL NOT NULL,
   score_percent DECIMAL NOT NULL,
   answers_json JSONB NOT NULL,
+  is_deleted INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -60,14 +60,14 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE TABLE IF NOT EXISTS evaluations (
   id TEXT PRIMARY KEY,
   organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c',
-  candidate_email TEXT NOT NULL,
-  interviewer_name TEXT NOT NULL,
+  candidate_id UUID,
   level TEXT NOT NULL,
   ratings JSONB NOT NULL,
   notes JSONB NOT NULL,
   final_outcome TEXT NOT NULL,
   final_comments TEXT,
   submitted_at TIMESTAMPTZ NOT NULL,
+  is_deleted INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

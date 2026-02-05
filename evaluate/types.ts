@@ -80,6 +80,7 @@ export interface AnswerDetail {
 export interface ExamResult {
   attemptId: string;
   organizationId?: string;
+  candidateId?: string;
   candidateName: string;
   candidateEmail: string;
   startedAt: string;
@@ -96,17 +97,27 @@ export interface ExamResult {
 }
 
 export interface InterviewEvaluation {
-  evaluationId: string;
+  id?: string;
   organizationId?: string;
+  candidateId?: string;
+  candidateName?: string;
   candidateEmail: string;
   interviewerName: string;
-  level: AssessmentLevel;
+  level: string;
   ratings: Record<string, Rating>;
   notes: Record<string, string>;
-  finalOutcome: EvaluationOutcome | null;
+  finalOutcome: string;
   finalComments: string;
   submittedAt: string;
-  aiVerdict?: AIVerdict;
+  areasOfStrength?: string[];
+  areasForImprovement?: string[];
+  recommendedAction?: string;
+  aiVerdict?: {
+    verdict: string;
+    confidence: number;
+    reasoning: string;
+    keySkillsAnalysis: Record<string, string>;
+  };
 }
 
 export interface AIVerdict {
@@ -118,8 +129,10 @@ export interface AIVerdict {
 export interface AppState {
   view: 'landing' | 'exam' | 'completion' | 'admin' | 'interviewer-form';
   candidate: {
+    id?: string;
     name: string;
     email: string;
+    organizationId?: string;
   } | null;
   currentAttempt: {
     id: string;

@@ -62,8 +62,27 @@ function Should-Deploy ($index) {
 # 1. Always Deploy Root Files (to ensure JSON is up to date)
 Write-Host "---------------------------------------------" -ForegroundColor Green
 Write-Host "Deploying Root Portal (index.html, tools.json, favicon)..."
-# Use tar pipe for root files
-tar -cf - index.html tools.json favicon.svg | ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf - -C $REMOTE_BASE"
+
+# Create temp tar for root files
+$rootTar = "root_deploy.tar"
+tar -cf $rootTar index.html tools.json favicon.svg
+
+if (Test-Path $rootTar) {
+    # Upload
+    Write-Host "Uploading root files..." -ForegroundColor DarkGray
+    scp $rootTar "$($SSH_USER)@$($HOST_NAME):$($REMOTE_BASE)/$rootTar"
+    
+    # Extract and cleanup remote
+    if ($?) { 
+        Write-Host "Extracting remote files..." -ForegroundColor DarkGray
+        ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf $REMOTE_BASE/$rootTar -C $REMOTE_BASE && rm $REMOTE_BASE/$rootTar" 
+    }
+    
+    # Cleanup local
+    Remove-Item $rootTar -ErrorAction SilentlyContinue
+} else {
+    Write-Error "Failed to create root tar archive."
+}
 
 # 2. Deploy Tools Loop
 if ($CHOICE -ne "1") {
@@ -74,13 +93,35 @@ if ($CHOICE -ne "1") {
             
             $folder = $tool.id
             $remotePath = "$REMOTE_BASE/$folder"
+            $toolTar = "tool_deploy.tar"
             
-            # Navigate to dist, tar content, pipe to ssh which mkdirs and untars
+            # Navigate to dist, tar content, upload, extract
             if (Test-Path "$folder/dist") {
                 Push-Location "$folder/dist"
                 try {
-                    # Note: We use . in tar to capture all files in current dir
-                    tar -cf - . | ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "mkdir -p $remotePath && tar -xf - -C $remotePath"
+                    # Create local tar of dist contents
+                    tar -cf $toolTar .
+                    
+                    if (Test-Path $toolTar) {
+                        # Ensure remote directory exists
+                        ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "mkdir -p $remotePath"
+
+                        # Upload
+                        Write-Host "Uploading artifact..." -ForegroundColor DarkGray
+                        scp $toolTar "$($SSH_USER)@$($HOST_NAME):$remotePath/$toolTar"
+                        
+                        # Extract and cleanup remote
+                        if ($?) {
+                             Write-Host "Extracting artifact..." -ForegroundColor DarkGray
+                             ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf $remotePath/$toolTar -C $remotePath && rm $remotePath/$toolTar"
+                        }
+
+                        # Cleanup local
+                        Remove-Item $toolTar -ErrorAction SilentlyContinue
+                    } else {
+                        Write-Error "Failed to create tar for $tool.name"
+                    }
+
                 } finally {
                     Pop-Location
                 }

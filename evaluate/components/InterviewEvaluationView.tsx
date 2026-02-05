@@ -7,13 +7,14 @@ interface Props {
   candidateEmail: string;
   candidateName: string;
   organizationId?: string;
+  candidateId?: string;
   onClose: () => void;
   onSubmit: (evaluation: InterviewEvaluation) => void;
 }
 
 import { apiService } from '../services/api';
 
-export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candidateName, organizationId, onClose, onSubmit }) => {
+export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candidateName, organizationId, candidateId, onClose, onSubmit }) => {
   const [level, setLevel] = useState<AssessmentLevel>('L4');
   const [interviewerName, setInterviewerName] = useState('');
   const [ratings, setRatings] = useState<Record<string, Rating>>({});
@@ -27,7 +28,9 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
 
   useEffect(() => {
     const loadEvaluation = async () => {
-      const existing = await apiService.getEvaluation(candidateEmail, organizationId);
+      // Use candidateId if available, otherwise email (legacy/fallback)
+      const lookupKey = candidateId || candidateEmail;
+      const existing = await apiService.getEvaluation(lookupKey, organizationId);
       if (existing) {
         setLevel(existing.level);
         setInterviewerName(existing.interviewerName);
@@ -53,7 +56,7 @@ export const InterviewEvaluationView: React.FC<Props> = ({ candidateEmail, candi
   const handleSubmit = () => {
     if (!isFormComplete) return;
     const evalData: InterviewEvaluation = {
-      evaluationId: `eval_${Date.now()}`,
+      id: `eval_${Date.now()}`,
       candidateEmail,
       interviewerName,
       level,

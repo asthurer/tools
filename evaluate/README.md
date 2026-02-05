@@ -2,7 +2,7 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Data Operations - Timed Qualification Portal
+# Evaluate.ai - Next-Gen Leadership Assessment Protocol
 
 A professional, high-stakes qualification platform designed for Data Engineering and Data Analytics candidates.
 This "Evaluate" tool serves as the primary gateway for assessing candidate skills through timed exams and interview evaluations.
