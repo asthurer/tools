@@ -3,6 +3,14 @@ export type Category = string;
 export type Difficulty = 'Easy' | 'Medium' | 'Hard';
 export type OptionKey = 'A' | 'B' | 'C' | 'D';
 
+export type AIProviderType = 'gemini' | 'openai' | 'claude';
+
+export interface AISettings {
+  provider: AIProviderType;
+  model: string;
+  apiKey: string;
+}
+
 export type Rating = 'Strong Evidence' | 'Good Evidence' | 'Limited Evidence' | 'No Evidence';
 export type EvaluationOutcome = 'Decline' | 'On Hold' | 'Progress to next stage' | 'Offer';
 export type AssessmentLevel = 'L4' | 'L5-L7';
@@ -51,6 +59,7 @@ export interface AssessmentSettings {
   questionTimeLimitSecs: number;
   totalQuestions: number;
   questionsPerSection: Record<string, number>;
+  aiSettings?: AISettings;
 }
 
 export interface Question {

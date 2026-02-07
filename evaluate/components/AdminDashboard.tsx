@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section, Organization, User, UserRole, Candidate, AuditLog, AuditEventType, AuditEntityType } from '../types';
+import { ExamResult, Question, InterviewEvaluation, Rating, Category, Difficulty, OptionKey, AssessmentSettings, AnswerDetail, Section, Organization, User, UserRole, Candidate, AuditLog, AuditEventType, AuditEntityType, AISettings, AIProviderType } from '../types';
 import { LEADERSHIP_STANDARDS, OVERALL_TIME_LIMIT_SEC, QUESTION_TIME_LIMIT_SEC } from '../constants';
 import { SUPABASE_CONFIG } from '../config';
 import { AIQuestionGenerator } from './AIQuestionGenerator';
@@ -109,6 +109,13 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
   const [newSectionName, setNewSectionName] = useState('');
   const [isAddingSection, setIsAddingSection] = useState(false);
+
+  // AI Settings State - Now deriving default/initial from loaded settings or safe default
+  const [aiSettings, setAiSettings] = useState<AISettings>({
+    provider: 'gemini',
+    model: 'gemini-2.0-flash',
+    apiKey: ''
+  });
 
   // Audit Log State
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -235,13 +242,20 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
     const settings = await apiService.getSettings(selectedOrgId);
     if (settings) {
       setAssessmentSettings(settings);
+      if (settings.aiSettings) {
+        setAiSettings(settings.aiSettings);
+      }
     }
   };
 
   const handleUpdateSettings = async () => {
     setLoading(true);
     setSyncMessage({ text: "Syncing with cloud...", type: 'info' });
-    const success = await apiService.updateSettings({ ...assessmentSettings, organizationId: selectedOrgId });
+    const success = await apiService.updateSettings({
+      ...assessmentSettings,
+      organizationId: selectedOrgId,
+      aiSettings: aiSettings // Include AI settings in the update
+    });
     setLoading(false);
     if (success) {
       setSyncMessage({ text: "Assessment parameters updated and saved to DB.", type: 'success' });
@@ -1252,10 +1266,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
       {showAIGenerator && (
         <AIQuestionGenerator
-          existingCategories={getActiveCategories()}
-          onClose={() => setShowAIGenerator(false)}
+          existingCategories={sections.map(s => s.name)}
           onSaveQuestions={handleAISave}
+          onClose={() => setShowAIGenerator(false)}
           organizationId={selectedOrgId}
+          aiSettings={aiSettings}
         />
       )}
 
@@ -1936,95 +1951,106 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
 
           {activeTab === 'config' && (
             <div className="grid lg:grid-cols-1 gap-12">
-              <div className="bg-white rounded-[48px] p-12 border border-slate-100 shadow-2xl">
-                <div className="flex justify-between items-start mb-12">
+              <div className="bg-white rounded-[40px] p-10 shadow-xl border border-slate-100">
+                <div className="flex justify-between items-start mb-8">
                   <div>
-                    <h3 className="text-3xl font-black text-[#002b49] uppercase tracking-tighter mb-2 leading-none">Assessment Strategy</h3>
-                    <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.3em]">Configure exam structure and timers</p>
+                    <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">System Configuration</h3>
+                    <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.3em] mt-1">Manage AI integration and assessment rules</p>
                   </div>
-                  <button onClick={handleUpdateSettings} className="bg-[#d4af37] text-[#002b49] px-10 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-[#d4af37]/10 hover:scale-[1.02] active:scale-95 transition-all">Sync to Cloud</button>
+                  <button onClick={handleUpdateSettings} className="bg-[#d4af37] text-[#002b49] px-8 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-[#d4af37]/10 hover:scale-[1.02] active:scale-95 transition-all">Sync to Cloud</button>
                 </div>
 
-                <div className="space-y-12">
-                  <div className="grid md:grid-cols-3 gap-8">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block px-1">TOTAL QUESTIONS</label>
-                      <input
-                        type="number"
-                        value={assessmentSettings.totalQuestions}
-                        onChange={e => setAssessmentSettings(prev => ({ ...prev, totalQuestions: Number(e.target.value) }))}
-                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-[32px] font-black text-slate-900 outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner text-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block px-1">OVERALL SESSION (MINS)</label>
-                      <input
-                        type="number"
-                        value={assessmentSettings.overallTimeLimitMins}
-                        onChange={e => setAssessmentSettings(prev => ({ ...prev, overallTimeLimitMins: Number(e.target.value) }))}
-                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-[32px] font-black text-slate-900 outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner text-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block px-1">PER QUESTION (SECS)</label>
-                      <input
-                        type="number"
-                        value={assessmentSettings.questionTimeLimitSecs}
-                        onChange={e => setAssessmentSettings(prev => ({ ...prev, questionTimeLimitSecs: Number(e.target.value) }))}
-                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-[32px] font-black text-slate-900 outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner text-xl"
-                      />
-                    </div>
-                  </div>
+                <div className="grid lg:grid-cols-2 gap-10">
+                  {/* AI Settings Section - SUPER ADMIN ONLY */}
+                  {currentUser?.role === 'super_admin' && (
+                    <div className="space-y-6">
+                      <div className="bg-slate-50 p-8 rounded-[32px] border border-slate-100">
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                          </div>
+                          <div>
+                            <h4 className="text-lg font-bold text-slate-900 leading-none">GenAI Configuration</h4>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Provider & Model Settings</p>
+                          </div>
+                        </div>
 
-                  <div className="border-t pt-10">
-                    <div className="flex justify-between items-center mb-8">
-                      <div>
-                        <h4 className="text-xl font-black text-[#002b49] uppercase tracking-tighter">Question Section Distribution</h4>
-                        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-widest mt-1">Define how many questions from each category are picked for a session</p>
+                        <div className="space-y-5">
+                          <div>
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">AI Provider</label>
+                            <select
+                              value={aiSettings.provider}
+                              onChange={(e) => setAiSettings({ ...aiSettings, provider: e.target.value as AIProviderType })}
+                              className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:border-purple-200 transition-colors"
+                            >
+                              <option value="gemini">Google Gemini</option>
+                              <option value="openai">OpenAI</option>
+                              <option value="claude">Anthropic Claude</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Model Name</label>
+                            <input
+                              type="text"
+                              value={aiSettings.model}
+                              onChange={(e) => setAiSettings({ ...aiSettings, model: e.target.value })}
+                              placeholder={aiSettings.provider === 'gemini' ? 'gemini-2.0-flash' : aiSettings.provider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022'}
+                              className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:border-purple-200 transition-colors"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">API Key</label>
+                            <input
+                              type="password"
+                              value={aiSettings.apiKey}
+                              onChange={(e) => setAiSettings({ ...aiSettings, apiKey: e.target.value })}
+                              placeholder={`Enter your ${aiSettings.provider} API key`}
+                              className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:border-purple-200 transition-colors"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-8">
+                    {/* Assessment Parameters Section */}
+                    <div>
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Assessment Parameters</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Total Duration (Mins)</label>
+                          <input
+                            type="number"
+                            value={assessmentSettings.overallTimeLimitMins}
+                            onChange={e => setAssessmentSettings({ ...assessmentSettings, overallTimeLimitMins: Number(e.target.value) })}
+                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-900 outline-none focus:bg-white focus:border-indigo-100 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Per Question (Secs)</label>
+                          <input
+                            type="number"
+                            value={assessmentSettings.questionTimeLimitSecs}
+                            onChange={e => setAssessmentSettings({ ...assessmentSettings, questionTimeLimitSecs: Number(e.target.value) })}
+                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-900 outline-none focus:bg-white focus:border-indigo-100 transition-colors"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Total Questions to Ask</label>
+                          <input
+                            type="number"
+                            value={assessmentSettings.totalQuestions}
+                            onChange={e => setAssessmentSettings({ ...assessmentSettings, totalQuestions: Number(e.target.value) })}
+                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-900 outline-none focus:bg-white focus:border-indigo-100 transition-colors"
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      {getActiveCategories().map(category => (
-                        <div key={category} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 shadow-inner group relative">
-                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block truncate" title={category}>{category}</label>
-                          <input
-                            type="number"
-                            value={assessmentSettings.questionsPerSection[category] || 0}
-                            onChange={e => handleSectionConfigChange(category, Number(e.target.value))}
-                            className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl font-black text-slate-900 outline-none focus:border-indigo-400 shadow-sm transition-all"
-                          />
-                        </div>
-                      ))}
-
-                      {isAddingSection ? (
-                        <div className="bg-indigo-50 p-6 rounded-3xl border-2 border-indigo-200 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
-                          <label className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-2 block">NEW SECTION NAME</label>
-                          <input
-                            autoFocus
-                            placeholder="e.g. Data Modeling"
-                            value={newSectionName}
-                            onChange={e => setNewSectionName(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleAddNewSection()}
-                            className="w-full p-4 bg-white border-2 border-indigo-100 rounded-2xl font-black text-slate-900 outline-none focus:border-indigo-400 mb-3"
-                          />
-                          <div className="flex gap-2">
-                            <button onClick={handleAddNewSection} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-[9px] font-black uppercase tracking-widest">Add</button>
-                            <button onClick={() => { setIsAddingSection(false); setNewSectionName(''); }} className="flex-1 bg-white text-indigo-400 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-100">Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setIsAddingSection(true)}
-                          className="bg-white border-4 border-dashed border-slate-100 rounded-3xl p-6 flex flex-col items-center justify-center gap-2 hover:border-[#d4af37] hover:bg-slate-50 transition-all text-slate-300 hover:text-[#d4af37]"
-                        >
-                          <span className="text-2xl font-black">+</span>
-                          <span className="text-[10px] font-black uppercase tracking-widest">Add Section</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="mt-8 p-6 bg-indigo-50 rounded-3xl border border-indigo-100">
+                    <div className="p-6 bg-indigo-50 rounded-3xl border border-indigo-100">
                       <div className="flex justify-between items-center font-black uppercase text-[10px] tracking-widest text-indigo-700">
                         <span>Total Configured Pick:</span>
                         <span className={`text-xl tracking-tighter ${Object.values(assessmentSettings.questionsPerSection).reduce((a: number, b: number) => a + b, 0) !== assessmentSettings.totalQuestions ? 'text-amber-600' : 'text-green-600'}`}>
@@ -2034,41 +2060,86 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
                     </div>
                   </div>
                 </div>
+
+                <div className="mt-10 border-t border-slate-100 pt-10">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Question Distribution by Section</h4>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {getActiveCategories().map(category => (
+                      <div key={category} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 shadow-inner group relative">
+                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block truncate" title={category}>{category}</label>
+                        <input
+                          type="number"
+                          value={assessmentSettings.questionsPerSection[category] || 0}
+                          onChange={e => handleSectionConfigChange(category, Number(e.target.value))}
+                          className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl font-black text-slate-900 outline-none focus:border-indigo-400 shadow-sm transition-all"
+                        />
+                      </div>
+                    ))}
+
+                    {isAddingSection ? (
+                      <div className="bg-indigo-50 p-6 rounded-3xl border-2 border-indigo-200 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <label className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-2 block">NEW SECTION NAME</label>
+                        <input
+                          autoFocus
+                          placeholder="e.g. Data Modeling"
+                          value={newSectionName}
+                          onChange={e => setNewSectionName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddNewSection()}
+                          className="w-full p-4 bg-white border-2 border-indigo-100 rounded-2xl font-black text-slate-900 outline-none focus:border-indigo-400 mb-3"
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={handleAddNewSection} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-[9px] font-black uppercase tracking-widest">Add</button>
+                          <button onClick={() => { setIsAddingSection(false); setNewSectionName(''); }} className="flex-1 bg-white text-indigo-400 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-100">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setIsAddingSection(true)}
+                        className="bg-white border-4 border-dashed border-slate-100 rounded-3xl p-6 flex flex-col items-center justify-center gap-2 hover:border-[#d4af37] hover:bg-slate-50 transition-all text-slate-300 hover:text-[#d4af37]"
+                      >
+                        <span className="text-2xl font-black">+</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">Add Section</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
           )}
 
-          {currentUser?.role === 'super_admin' && activeTab === 'config' && (
-            <div className="bg-[#002b49] rounded-[48px] p-12 shadow-2xl border border-white/5 mt-10">
-              <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2 leading-none">Infrastructure</h3>
-              <p className="text-white/40 text-[11px] font-bold uppercase tracking-[0.3em] mb-12">Cloud synchronization & health</p>
+          {
+            currentUser?.role === 'super_admin' && activeTab === 'config' && (
+              <div className="bg-[#002b49] rounded-[48px] p-12 shadow-2xl border border-white/5 mt-10">
+                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2 leading-none">Infrastructure</h3>
+                <p className="text-white/40 text-[11px] font-bold uppercase tracking-[0.3em] mb-12">Cloud synchronization & health</p>
 
-              <div className="space-y-6">
-                <div className="flex justify-between items-center p-6 bg-white/5 border border-white/10 rounded-3xl">
-                  <span className="text-[10px] font-black uppercase text-white/40 tracking-widest">Global connection</span>
-                  <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${infraStatus.connected ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                    {infraStatus.connected ? 'ONLINE' : 'DISCONNECTED'}
-                  </span>
-                </div>
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center p-6 bg-white/5 border border-white/10 rounded-3xl">
+                    <span className="text-[10px] font-black uppercase text-white/40 tracking-widest">Global connection</span>
+                    <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${infraStatus.connected ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                      {infraStatus.connected ? 'ONLINE' : 'DISCONNECTED'}
+                    </span>
+                  </div>
 
-                <div className="grid grid-cols-1 gap-4">
-                  {['questions', 'results', 'evaluations', 'settings', 'sections', 'organizations', 'users'].map(table => (
-                    <div key={table} className="flex justify-between items-center p-6 bg-white rounded-3xl shadow-lg border-b-4 border-slate-100">
-                      <span className="text-[11px] font-black uppercase text-slate-800 tracking-widest">{table} collection</span>
-                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${infraStatus.tables[table] ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                        {infraStatus.tables[table] ? 'VERIFIED' : 'NOT FOUND'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                  <div className="grid grid-cols-1 gap-4">
+                    {['questions', 'results', 'evaluations', 'settings', 'sections', 'organizations', 'users'].map(table => (
+                      <div key={table} className="flex justify-between items-center p-6 bg-white rounded-3xl shadow-lg border-b-4 border-slate-100">
+                        <span className="text-[11px] font-black uppercase text-slate-800 tracking-widest">{table} collection</span>
+                        <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${infraStatus.tables[table] ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                          {infraStatus.tables[table] ? 'VERIFIED' : 'NOT FOUND'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
 
-                {!Object.values(infraStatus.tables).every(v => v) && (
-                  <div className="mt-8 pt-10 border-t border-white/5">
-                    <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest mb-6 text-center">Protocol deviation detected: Table schema required.</p>
-                    <p className="text-[9px] text-white/40 font-bold uppercase mb-6 text-center">If "settings" or other tables are "NOT FOUND", please execute the SQL script in your Supabase SQL Editor.</p>
-                    <button
-                      onClick={() => {
-                        const sql = `
+                  {!Object.values(infraStatus.tables).every(v => v) && (
+                    <div className="mt-8 pt-10 border-t border-white/5">
+                      <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest mb-6 text-center">Protocol deviation detected: Table schema required.</p>
+                      <p className="text-[9px] text-white/40 font-bold uppercase mb-6 text-center">If "settings" or other tables are "NOT FOUND", please execute the SQL script in your Supabase SQL Editor.</p>
+                      <button
+                        onClick={() => {
+                          const sql = `
 -- Disable Row Level Security (RLS)
 ALTER TABLE sections DISABLE ROW LEVEL SECURITY;
 ALTER TABLE questions DISABLE ROW LEVEL SECURITY;
@@ -2078,248 +2149,253 @@ ALTER TABLE settings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE organizations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 
--- MIGRATION: Multi-tenancy Support
+-- MIGRATION: Multi-tenancy Support (Ensure both potential default IDs exist)
 INSERT INTO organizations (id, name, admin_name, admin_email)
-VALUES ('a956050a-8eb5-44e0-8725-24269181038c', 'Default Organization', 'System Admin', 'admin@default.com')
+VALUES 
+  ('55147170-54ed-4fdd-840b-66f81cbc1883', 'System Organization', 'System Admin', 'admin@system.com'),
+  ('a956050a-8eb5-44e0-8725-24269181038c', 'Default Organization', 'System Admin', 'admin@default.com')
 ON CONFLICT (id) DO NOTHING;
 
--- Create Tables with organization_id support
+-- Create Tables with organization_id support (Defaults to System Org)
 CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, admin_name TEXT, admin_email TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
 
-CREATE TABLE IF NOT EXISTS sections (name TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (name, organization_id));
+CREATE TABLE IF NOT EXISTS sections (name TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (name, organization_id));
 
-CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, section_name TEXT NOT NULL, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', difficulty TEXT NOT NULL, text TEXT NOT NULL, options JSONB NOT NULL, correct_option CHAR(1) NOT NULL, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), FOREIGN KEY (section_name, organization_id) REFERENCES sections(name, organization_id) ON UPDATE CASCADE);
+CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, section_name TEXT NOT NULL, organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', difficulty TEXT NOT NULL, text TEXT NOT NULL, options JSONB NOT NULL, correct_option CHAR(1) NOT NULL, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now(), FOREIGN KEY (section_name, organization_id) REFERENCES sections(name, organization_id) ON UPDATE CASCADE);
 
-CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', candidate_name TEXT NOT NULL, candidate_email TEXT NOT NULL, started_at TIMESTAMPTZ NOT NULL, submitted_at TIMESTAMPTZ NOT NULL, total_time_taken_sec INTEGER NOT NULL, total_questions INTEGER NOT NULL, attempted_count INTEGER NOT NULL, missed_count INTEGER NOT NULL, correct_count INTEGER NOT NULL, wrong_count INTEGER NOT NULL, avg_time_per_answered_sec DECIMAL NOT NULL, score_percent DECIMAL NOT NULL, answers_json JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', candidate_name TEXT NOT NULL, candidate_email TEXT NOT NULL, started_at TIMESTAMPTZ NOT NULL, submitted_at TIMESTAMPTZ NOT NULL, total_time_taken_sec INTEGER NOT NULL, total_questions INTEGER NOT NULL, attempted_count INTEGER NOT NULL, missed_count INTEGER NOT NULL, correct_count INTEGER NOT NULL, wrong_count INTEGER NOT NULL, avg_time_per_answered_sec DECIMAL NOT NULL, score_percent DECIMAL NOT NULL, answers_json JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
 
-CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', candidate_email TEXT NOT NULL, interviewer_name TEXT NOT NULL, level TEXT NOT NULL, ratings JSONB NOT NULL, notes JSONB NOT NULL, final_outcome TEXT NOT NULL, final_comments TEXT, submitted_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', candidate_email TEXT NOT NULL, interviewer_name TEXT NOT NULL, level TEXT NOT NULL, ratings JSONB NOT NULL, notes JSONB NOT NULL, final_outcome TEXT NOT NULL, final_comments TEXT, submitted_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
 
-CREATE TABLE IF NOT EXISTS settings (key TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', value JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (key, organization_id));
+CREATE TABLE IF NOT EXISTS settings (key TEXT, organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', value JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (key, organization_id));
 
-CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY DEFAULT gen_random_uuid(), organization_id TEXT REFERENCES organizations(id) DEFAULT 'a956050a-8eb5-44e0-8725-24269181038c', email TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, role TEXT CHECK (role IN ('super_admin', 'admin')) NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY DEFAULT gen_random_uuid(), organization_id TEXT REFERENCES organizations(id) DEFAULT '55147170-54ed-4fdd-840b-66f81cbc1883', email TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, role TEXT CHECK (role IN ('super_admin', 'admin')) NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
 
 -- Migration for existing tables (Idempotent)
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'organization_id') THEN ALTER TABLE users ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE users SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sections' AND column_name = 'organization_id') THEN ALTER TABLE sections ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE sections SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; ALTER TABLE sections DROP CONSTRAINT sections_pkey CASCADE; ALTER TABLE sections ADD PRIMARY KEY (name, organization_id); END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'questions' AND column_name = 'organization_id') THEN ALTER TABLE questions ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE questions SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'results' AND column_name = 'organization_id') THEN ALTER TABLE results ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE results SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'evaluations' AND column_name = 'organization_id') THEN ALTER TABLE evaluations ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE evaluations SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'settings' AND column_name = 'organization_id') THEN ALTER TABLE settings ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE settings SET organization_id = 'a956050a-8eb5-44e0-8725-24269181038c' WHERE organization_id IS NULL; ALTER TABLE settings DROP CONSTRAINT settings_pkey CASCADE; ALTER TABLE settings ADD PRIMARY KEY (key, organization_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'organization_id') THEN ALTER TABLE users ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE users SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sections' AND column_name = 'organization_id') THEN ALTER TABLE sections ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE sections SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; ALTER TABLE sections DROP CONSTRAINT sections_pkey CASCADE; ALTER TABLE sections ADD PRIMARY KEY (name, organization_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'questions' AND column_name = 'organization_id') THEN ALTER TABLE questions ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE questions SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'results' AND column_name = 'organization_id') THEN ALTER TABLE results ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE results SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'evaluations' AND column_name = 'organization_id') THEN ALTER TABLE evaluations ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE evaluations SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'settings' AND column_name = 'organization_id') THEN ALTER TABLE settings ADD COLUMN organization_id TEXT REFERENCES organizations(id); UPDATE settings SET organization_id = '55147170-54ed-4fdd-840b-66f81cbc1883' WHERE organization_id IS NULL; ALTER TABLE settings DROP CONSTRAINT settings_pkey CASCADE; ALTER TABLE settings ADD PRIMARY KEY (key, organization_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_admin_email_key') THEN ALTER TABLE organizations ADD CONSTRAINT organizations_admin_email_key UNIQUE (admin_email); END IF; END $$;
 `;
-                        navigator.clipboard.writeText(sql);
-                        setSyncMessage({ text: "Database Schema captured to clipboard.", type: 'success' });
-                      }}
-                      className="w-full bg-[#d4af37] text-[#002b49] py-5 rounded-3xl font-black uppercase text-[11px] tracking-widest shadow-2xl hover:bg-amber-400 transition-all"
-                    >
-                      Copy SQL Initialization Script
-                    </button>
-                  </div>
-                )}
+                          navigator.clipboard.writeText(sql);
+                          setSyncMessage({ text: "Database Schema captured to clipboard.", type: 'success' });
+                        }}
+                        className="w-full bg-[#d4af37] text-[#002b49] py-5 rounded-3xl font-black uppercase text-[11px] tracking-widest shadow-2xl hover:bg-amber-400 transition-all"
+                      >
+                        Copy SQL Initialization Script
+                      </button>
+                    </div>
+                  )}
 
-                <button onClick={() => runDiagnostics()} className="w-full text-white/20 hover:text-white font-black uppercase text-[9px] tracking-[0.4em] transition-all mt-6 text-center underline">RE-RUN INFRASTRUCTURE DIAGNOSTICS</button>
+                  <button onClick={() => runDiagnostics()} className="w-full text-white/20 hover:text-white font-black uppercase text-[9px] tracking-[0.4em] transition-all mt-6 text-center underline">RE-RUN INFRASTRUCTURE DIAGNOSTICS</button>
+                </div>
               </div>
-            </div>
-          )}
+            )
+          }
 
           {/* AUDIT LOGS TAB */}
-          {activeTab === 'audit' && currentUser?.role === 'super_admin' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="bg-white rounded-[40px] p-10 shadow-xl border border-slate-100">
-                <div className="flex justify-between items-center mb-8">
-                  <div>
-                    <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Audit Trail</h2>
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">Complete activity log with IP tracking</p>
-                  </div>
-                  <button
-                    onClick={handleExportAuditLogs}
-                    className="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-green-700 transition-all flex items-center gap-2"
-                  >
-                    📊 Export CSV
-                  </button>
-                </div>
-
-                {/* Filters */}
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                  <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Event Type</label>
-                    <select
-                      value={auditFilters.eventType}
-                      onChange={e => { setAuditFilters({ ...auditFilters, eventType: e.target.value as any }); fetchAuditLogs(); }}
-                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+          {
+            activeTab === 'audit' && currentUser?.role === 'super_admin' && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="bg-white rounded-[40px] p-10 shadow-xl border border-slate-100">
+                  <div className="flex justify-between items-center mb-8">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Audit Trail</h2>
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">Complete activity log with IP tracking</p>
+                    </div>
+                    <button
+                      onClick={handleExportAuditLogs}
+                      className="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-green-700 transition-all flex items-center gap-2"
                     >
-                      <option value="">All Events</option>
-                      <option value="login">Login</option>
-                      <option value="logout">Logout</option>
-                      <option value="create">Create</option>
-                      <option value="update">Update</option>
-                      <option value="delete">Delete</option>
-                      <option value="reset">Reset</option>
-                      <option value="exam_submit">Exam Submit</option>
-                      <option value="eval_submit">Eval Submit</option>
-                      <option value="ai_verdict_generate">AI Verdict</option>
-                    </select>
+                      📊 Export CSV
+                    </button>
                   </div>
 
-                  <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Entity Type</label>
-                    <select
-                      value={auditFilters.entityType}
-                      onChange={e => { setAuditFilters({ ...auditFilters, entityType: e.target.value as any }); fetchAuditLogs(); }}
-                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
-                    >
-                      <option value="">All Entities</option>
-                      <option value="candidate">Candidate</option>
-                      <option value="question">Question</option>
-                      <option value="result">Result</option>
-                      <option value="evaluation">Evaluation</option>
-                      <option value="user">User</option>
-                      <option value="organization">Organization</option>
-                      <option value="settings">Settings</option>
-                    </select>
+                  {/* Filters */}
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Event Type</label>
+                      <select
+                        value={auditFilters.eventType}
+                        onChange={e => { setAuditFilters({ ...auditFilters, eventType: e.target.value as any }); fetchAuditLogs(); }}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                      >
+                        <option value="">All Events</option>
+                        <option value="login">Login</option>
+                        <option value="logout">Logout</option>
+                        <option value="create">Create</option>
+                        <option value="update">Update</option>
+                        <option value="delete">Delete</option>
+                        <option value="reset">Reset</option>
+                        <option value="exam_submit">Exam Submit</option>
+                        <option value="eval_submit">Eval Submit</option>
+                        <option value="ai_verdict_generate">AI Verdict</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Entity Type</label>
+                      <select
+                        value={auditFilters.entityType}
+                        onChange={e => { setAuditFilters({ ...auditFilters, entityType: e.target.value as any }); fetchAuditLogs(); }}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                      >
+                        <option value="">All Entities</option>
+                        <option value="candidate">Candidate</option>
+                        <option value="question">Question</option>
+                        <option value="result">Result</option>
+                        <option value="evaluation">Evaluation</option>
+                        <option value="user">User</option>
+                        <option value="organization">Organization</option>
+                        <option value="settings">Settings</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">User Email</label>
+                      <input
+                        type="text"
+                        value={auditFilters.userEmail}
+                        onChange={e => setAuditFilters({ ...auditFilters, userEmail: e.target.value })}
+                        onBlur={fetchAuditLogs}
+                        placeholder="Filter by user..."
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-medium"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Limit</label>
+                      <select
+                        value={auditFilters.limit}
+                        onChange={e => { setAuditFilters({ ...auditFilters, limit: Number(e.target.value) }); fetchAuditLogs(); }}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                      >
+                        <option value={50}>50 logs</option>
+                        <option value={100}>100 logs</option>
+                        <option value={250}>250 logs</option>
+                        <option value={500}>500 logs</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">User Email</label>
-                    <input
-                      type="text"
-                      value={auditFilters.userEmail}
-                      onChange={e => setAuditFilters({ ...auditFilters, userEmail: e.target.value })}
-                      onBlur={fetchAuditLogs}
-                      placeholder="Filter by user..."
-                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-medium"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Limit</label>
-                    <select
-                      value={auditFilters.limit}
-                      onChange={e => { setAuditFilters({ ...auditFilters, limit: Number(e.target.value) }); fetchAuditLogs(); }}
-                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
-                    >
-                      <option value={50}>50 logs</option>
-                      <option value={100}>100 logs</option>
-                      <option value={250}>250 logs</option>
-                      <option value={500}>500 logs</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Audit Log Table */}
-                <div className="overflow-x-auto rounded-3xl border border-slate-200">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200">
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Timestamp</th>
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Event</th>
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">User</th>
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Entity</th>
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">IP Address</th>
-                        <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Device</th>
-                        <th className="text-center p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Details</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {auditLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="text-center p-12 text-slate-400 text-sm font-medium">
-                            No audit logs found. Events will appear here as users interact with the system.
-                          </td>
+                  {/* Audit Log Table */}
+                  <div className="overflow-x-auto rounded-3xl border border-slate-200">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Timestamp</th>
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Event</th>
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">User</th>
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Entity</th>
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">IP Address</th>
+                          <th className="text-left p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Device</th>
+                          <th className="text-center p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Details</th>
                         </tr>
-                      ) : (
-                        auditLogs.map(log => {
-                          const deviceInfo = log.deviceInfo ? JSON.parse(log.deviceInfo || '{}') : {};
-                          const getEventColor = (eventType: string) => {
-                            switch (eventType) {
-                              case 'login': return 'bg-blue-50 text-blue-700 border-blue-200';
-                              case 'logout': return 'bg-slate-50 text-slate-600 border-slate-200';
-                              case 'create': return 'bg-green-50 text-green-700 border-green-200';
-                              case 'update': return 'bg-amber-50 text-amber-700 border-amber-200';
-                              case 'delete': return 'bg-red-50 text-red-700 border-red-200';
-                              case 'reset': return 'bg-purple-50 text-purple-700 border-purple-200';
-                              case 'exam_submit': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
-                              case 'eval_submit': return 'bg-pink-50 text-pink-700 border-pink-200';
-                              case 'ai_verdict_generate': return 'bg-cyan-50 text-cyan-700 border-cyan-200';
-                              default: return 'bg-slate-50 text-slate-600 border-slate-200';
-                            }
-                          };
+                      </thead>
+                      <tbody>
+                        {auditLogs.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center p-12 text-slate-400 text-sm font-medium">
+                              No audit logs found. Events will appear here as users interact with the system.
+                            </td>
+                          </tr>
+                        ) : (
+                          auditLogs.map(log => {
+                            const deviceInfo = log.deviceInfo ? JSON.parse(log.deviceInfo || '{}') : {};
+                            const getEventColor = (eventType: string) => {
+                              switch (eventType) {
+                                case 'login': return 'bg-blue-50 text-blue-700 border-blue-200';
+                                case 'logout': return 'bg-slate-50 text-slate-600 border-slate-200';
+                                case 'create': return 'bg-green-50 text-green-700 border-green-200';
+                                case 'update': return 'bg-amber-50 text-amber-700 border-amber-200';
+                                case 'delete': return 'bg-red-50 text-red-700 border-red-200';
+                                case 'reset': return 'bg-purple-50 text-purple-700 border-purple-200';
+                                case 'exam_submit': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                                case 'eval_submit': return 'bg-pink-50 text-pink-700 border-pink-200';
+                                case 'ai_verdict_generate': return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+                                default: return 'bg-slate-50 text-slate-600 border-slate-200';
+                              }
+                            };
 
-                          return (
-                            <React.Fragment key={log.id}>
-                              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-all">
-                                <td className="p-4 text-xs font-medium text-slate-600 whitespace-nowrap">
-                                  {new Date(log.timestamp).toLocaleString()}
-                                </td>
-                                <td className="p-4">
-                                  <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${getEventColor(log.eventType)}`}>
-                                    {log.eventType}
-                                  </span>
-                                </td>
-                                <td className="p-4 text-xs font-medium text-slate-700 max-w-[200px] truncate" title={log.userEmail || 'N/A'}>
-                                  {log.userEmail || 'System'}
-                                </td>
-                                <td className="p-4">
-                                  {log.entityType && (
-                                    <div className="text-xs">
-                                      <div className="font-bold text-slate-900">{log.entityType}</div>
-                                      {log.entityId && <div className="text-[10px] text-slate-400 font-mono truncate max-w-[150px]" title={log.entityId}>{log.entityId}</div>}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="p-4 text-xs font-mono text-slate-600">
-                                  {log.ipAddress || 'N/A'}
-                                </td>
-                                <td className="p-4">
-                                  {deviceInfo.browser && (
-                                    <div className="text-xs">
-                                      <div className="font-bold text-slate-900 flex items-center gap-1">
-                                        {deviceInfo.deviceType === 'desktop' && '🖥️'}
-                                        {deviceInfo.deviceType === 'mobile' && '📱'}
-                                        {deviceInfo.deviceType === 'tablet' && '📱'}
-                                        {deviceInfo.browser}
+                            return (
+                              <React.Fragment key={log.id}>
+                                <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-all">
+                                  <td className="p-4 text-xs font-medium text-slate-600 whitespace-nowrap">
+                                    {new Date(log.timestamp).toLocaleString()}
+                                  </td>
+                                  <td className="p-4">
+                                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${getEventColor(log.eventType)}`}>
+                                      {log.eventType}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-xs font-medium text-slate-700 max-w-[200px] truncate" title={log.userEmail || 'N/A'}>
+                                    {log.userEmail || 'System'}
+                                  </td>
+                                  <td className="p-4">
+                                    {log.entityType && (
+                                      <div className="text-xs">
+                                        <div className="font-bold text-slate-900">{log.entityType}</div>
+                                        {log.entityId && <div className="text-[10px] text-slate-400 font-mono truncate max-w-[150px]" title={log.entityId}>{log.entityId}</div>}
                                       </div>
-                                      <div className="text-[10px] text-slate-400">{deviceInfo.os}</div>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="p-4 text-center">
-                                  {log.actionDetails && (
-                                    <button
-                                      onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-black text-slate-600 uppercase tracking-wider transition-all"
-                                    >
-                                      {expandedLogId === log.id ? 'Hide' : 'View'}
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                              {expandedLogId === log.id && log.actionDetails && (
-                                <tr>
-                                  <td colSpan={7} className="p-6 bg-slate-50 border-b border-slate-200">
-                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Action Details</p>
-                                      <pre className="text-xs font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(JSON.parse(log.actionDetails), null, 2)}</pre>
-                                    </div>
+                                    )}
+                                  </td>
+                                  <td className="p-4 text-xs font-mono text-slate-600">
+                                    {log.ipAddress || 'N/A'}
+                                  </td>
+                                  <td className="p-4">
+                                    {deviceInfo.browser && (
+                                      <div className="text-xs">
+                                        <div className="font-bold text-slate-900 flex items-center gap-1">
+                                          {deviceInfo.deviceType === 'desktop' && '🖥️'}
+                                          {deviceInfo.deviceType === 'mobile' && '📱'}
+                                          {deviceInfo.deviceType === 'tablet' && '📱'}
+                                          {deviceInfo.browser}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">{deviceInfo.os}</div>
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="p-4 text-center">
+                                    {log.actionDetails && (
+                                      <button
+                                        onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                        className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-black text-slate-600 uppercase tracking-wider transition-all"
+                                      >
+                                        {expandedLogId === log.id ? 'Hide' : 'View'}
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                                {expandedLogId === log.id && log.actionDetails && (
+                                  <tr>
+                                    <td colSpan={7} className="p-6 bg-slate-50 border-b border-slate-200">
+                                      <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Action Details</p>
+                                        <pre className="text-xs font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(JSON.parse(log.actionDetails), null, 2)}</pre>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
 
-                <div className="mt-6 text-center text-xs text-slate-400 font-medium">
-                  Showing {auditLogs.length} audit log entries
+                  <div className="mt-6 text-center text-xs text-slate-400 font-medium">
+                    Showing {auditLogs.length} audit log entries
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )
+          }
 
-        </div>
+        </div >
       )}
       <ConfirmationModal
         isOpen={confirmation.isOpen}

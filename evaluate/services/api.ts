@@ -217,6 +217,11 @@ export const apiService = {
           'IQ': 5,
           'Behavioural': 5,
           'Analytical Ability': 5
+        },
+        aiSettings: settingsMap.genai_config ?? {
+          provider: 'gemini',
+          model: 'gemini-2.0-flash',
+          apiKey: ''
         }
       };
     } catch (err) {
@@ -325,7 +330,9 @@ export const apiService = {
         { key: 'overall_time', value: settings.overallTimeLimitMins, organization_id: orgId },
         { key: 'per_question_time', value: settings.questionTimeLimitSecs, organization_id: orgId },
         { key: 'total_questions', value: settings.totalQuestions, organization_id: orgId },
-        { key: 'section_config', value: settings.questionsPerSection, organization_id: orgId }
+
+        { key: 'section_config', value: settings.questionsPerSection, organization_id: orgId },
+        { key: 'genai_config', value: settings.aiSettings, organization_id: orgId }
       ];
       const { error } = await sb.from('settings').upsert(payload, { onConflict: 'key,organization_id' });
 
@@ -348,7 +355,7 @@ export const apiService = {
       if (error) throw error;
       return true;
     } catch (err) {
-      console.error("Failed to update settings:", err);
+      console.error("Failed to update settings:", JSON.stringify(err, null, 2));
       return false;
     }
   },
@@ -1067,7 +1074,11 @@ export const apiService = {
             Output EXACTLY 3 questions, one per line. Do not include numbering or prefixes like "1.".
           `;
 
-      const text = await aiService.generateText(prompt, organizationId);
+      // Fetch AI settings for the organization first
+      const settings = await this.getSettings(organizationId);
+      const aiSettings = settings?.aiSettings || { provider: 'gemini', model: 'gemini-2.0-flash', apiKey: '' };
+
+      const text = await aiService.generateText(prompt, aiSettings, organizationId);
       return text.split('\n').filter(line => line.trim().length > 0).slice(0, 3);
     } catch (e) {
       console.error("AI Generation failed", e);
@@ -1093,7 +1104,11 @@ export const apiService = {
         }
       `;
 
-      return await aiService.generateJSON<{ decision: 'Hire' | 'No Hire' | 'Review', confidence: number, rationale: string }>(prompt, organizationId);
+      // Fetch AI settings for the organization first
+      const settings = await this.getSettings(organizationId);
+      const aiSettings = settings?.aiSettings || { provider: 'gemini', model: 'gemini-2.0-flash', apiKey: '' };
+
+      return await aiService.generateJSON<{ decision: 'Hire' | 'No Hire' | 'Review', confidence: number, rationale: string }>(prompt, aiSettings, organizationId);
     } catch (e) {
       console.error("Verdict Generation failed", e);
       return { decision: 'Review', confidence: 0, rationale: "AI failed to generate verdict." };

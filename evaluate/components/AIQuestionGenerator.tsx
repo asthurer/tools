@@ -1,16 +1,17 @@
 
 import React, { useState } from 'react';
 import { aiService } from '../services/aiService';
-import { Question, Category, Difficulty, OptionKey } from '../types';
+import { Question, Category, Difficulty, OptionKey, AISettings } from '../types';
 
 interface Props {
   existingCategories: string[];
   onSaveQuestions: (questions: Question[]) => void;
   onClose: () => void;
   organizationId?: string;
+  aiSettings: AISettings;
 }
 
-export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSaveQuestions, onClose, organizationId }) => {
+export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSaveQuestions, onClose, organizationId, aiSettings }) => {
   const [category, setCategory] = useState(existingCategories[0] || 'General');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategory, setCustomCategory] = useState('');
@@ -24,6 +25,11 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
     const finalCategory = isCustomCategory ? customCategory.trim() : category;
     if (isCustomCategory && !finalCategory) {
       setError("Please enter a custom category name.");
+      return;
+    }
+
+    if (!aiSettings.apiKey) {
+      setError(`API Key for ${aiSettings.provider} is missing. Configure it in Settings.`);
       return;
     }
 
@@ -48,7 +54,7 @@ export const AIQuestionGenerator: React.FC<Props> = ({ existingCategories, onSav
           ]
           Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
 
-      const json = await aiService.generateJSON<any[]>(prompt, organizationId);
+      const json = await aiService.generateJSON<any[]>(prompt, aiSettings, organizationId);
       if (!Array.isArray(json)) throw new Error("Invalid response format.");
 
       const formatted: Question[] = json.map((q: any, i: number) => ({
