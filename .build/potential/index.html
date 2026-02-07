@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Potential Assessment Tool</title>
+  <link rel="icon" type="image/svg+xml" href="/tools/potential/favicon.svg" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6203264496666169"
+    crossorigin="anonymous"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #fdfdfd;
+    }
+
+    h1,
+    h2,
+    h3,
+    .serif-font {
+      font-family: 'Playfair Display', serif;
+    }
+
+    .vertical-text {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+    }
+
+    @media print {
+      @page {
+        margin: 0.5cm;
+        size: portrait;
+      }
+
+      body {
+        background-color: white !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      /* Hide interactive elements */
+      nav,
+      button,
+      .no-print,
+      .shadow-lg,
+      .animate-spin {
+        display: none !important;
+      }
+
+      /* Ensure containers expand */
+      .min-h-screen {
+        min-height: auto !important;
+        padding-bottom: 0 !important;
+      }
+
+      /* Force background colors to print */
+      [class*="bg-"] {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      /* Adjust chart containers */
+      .recharts-responsive-container {
+        width: 100% !important;
+        height: 300px !important;
+      }
+
+      /* Ensure page breaks don't split cards awkwardly */
+      .break-inside-avoid {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+
+  <!-- Google API Scripts -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/tools/potential/assets/index-qz6asziL.js"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>

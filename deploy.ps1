@@ -54,6 +54,7 @@ $CHOICE = Read-Host "Enter Choice (0-$($i-1))"
 Write-Host ""
 Pause
 
+
 # Helper function to check choice
 function Should-Deploy ($index) {
     return ($CHOICE -eq "0" -or $CHOICE -eq "$index")
@@ -65,7 +66,7 @@ Write-Host "Deploying Root Portal (index.html, tools.json, favicon)..."
 
 # Create temp tar for root files
 $rootTar = "root_deploy.tar"
-tar -cf $rootTar index.html tools.json favicon.svg
+tar -cf $rootTar index.html tools.json favicon.png
 
 if (Test-Path $rootTar) {
     # Upload
@@ -80,7 +81,8 @@ if (Test-Path $rootTar) {
     
     # Cleanup local
     Remove-Item $rootTar -ErrorAction SilentlyContinue
-} else {
+}
+else {
     Write-Error "Failed to create root tar archive."
 }
 
@@ -112,20 +114,23 @@ if ($CHOICE -ne "1") {
                         
                         # Extract and cleanup remote
                         if ($?) {
-                             Write-Host "Extracting artifact..." -ForegroundColor DarkGray
-                             ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf $remotePath/$toolTar -C $remotePath && rm $remotePath/$toolTar"
+                            Write-Host "Extracting artifact..." -ForegroundColor DarkGray
+                            ssh -p $PORT "$($SSH_USER)@$($HOST_NAME)" "tar -xf $remotePath/$toolTar -C $remotePath && rm $remotePath/$toolTar"
                         }
 
                         # Cleanup local
                         Remove-Item $toolTar -ErrorAction SilentlyContinue
-                    } else {
+                    }
+                    else {
                         Write-Error "Failed to create tar for $tool.name"
                     }
 
-                } finally {
+                }
+                finally {
                     Pop-Location
                 }
-            } else {
+            }
+            else {
                 Write-Error "Dist folder not found for $folder! Did you build it?"
             }
         }

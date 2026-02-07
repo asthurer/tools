@@ -44,6 +44,9 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   // Use the prop if passed, otherwise fall back to local (backward compatibility/stand-alone)
   const selectedOrgId = propSelectedOrgId !== undefined ? propSelectedOrgId : localSelectedOrgId;
 
+  // Check if current organization is the demo organization
+  const isDemoOrg = organizations.find(org => org.id === selectedOrgId)?.name?.toLowerCase() === 'demo';
+
   const handleOrgChange = (newId: string) => {
     if (onOrganizationSelect) {
       onOrganizationSelect(newId);
@@ -569,6 +572,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   };
 
   const handleResetCandidate = async (id: string) => {
+    if (isDemoOrg) {
+      setSyncMessage({ text: "Reset is disabled for the demo organization.", type: 'error' });
+      setTimeout(() => setSyncMessage(null), 3000);
+      return;
+    }
     requestConfirmation("Reset Candidate?", "This will archive their previous attempts and allow them to take the exam again.", async () => {
       setLoading(true);
       const success = await apiService.resetCandidate(id);
@@ -584,6 +592,11 @@ export const AdminDashboard: React.FC<Props> = ({ onEvaluate, onLogout, currentU
   };
 
   const handleDeleteCandidate = async (id: string) => {
+    if (isDemoOrg) {
+      setSyncMessage({ text: "Delete is disabled for the demo organization.", type: 'error' });
+      setTimeout(() => setSyncMessage(null), 3000);
+      return;
+    }
     requestConfirmation("Delete Candidate?", "This will verify remove the candidate from the registry.", async () => {
       setLoading(true);
       const success = await apiService.deleteCandidate(id);

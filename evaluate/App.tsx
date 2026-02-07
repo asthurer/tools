@@ -332,6 +332,9 @@ const App: React.FC = () => {
                     {isLoggingIn ? 'Authenticating...' : 'Enter Console'}
                   </button>
                 </div>
+                <div className="mt-4 text-center text-[10px] text-slate-400 font-medium">
+                  <span className="text-slate-500">Demo:</span> demo@asthurer.com / demo
+                </div>
               </form>
             ) : (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
@@ -415,6 +418,7 @@ const App: React.FC = () => {
                   >
                     System Administrator Access
                   </button>
+
                 </div>
               </div>
             )}

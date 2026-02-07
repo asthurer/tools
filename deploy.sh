@@ -43,7 +43,7 @@ deploy_tar() {
 }
 # Special handler for root files which are individual files, not a dir content dump
 deploy_root() {
-    FILES="index.html tools.json favicon.svg"
+    FILES="index.html tools.json favicon.png"
     CMD="tar -xf - -C $REMOTE_BASE"
     
     if [ ! -z "$SSH_PASS" ] && command -v sshpass &> /dev/null; then
