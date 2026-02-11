@@ -1,124 +1,123 @@
 import React, { useState } from 'react';
-import { Database, Table, GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
+import { Database, ChevronUp, ChevronDown, Clock, Terminal } from 'lucide-react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle, usePanelRef } from 'react-resizable-panels';
-
+import type { QueryResult } from '../types/settings';
 import { VizContent } from './VizContent';
 
 interface ResultsViewProps {
-    data: any[];
-    sql?: string;
-    vizConfig?: any;
+    results: QueryResult[];
 }
 
-export const ResultsView: React.FC<ResultsViewProps> = ({ data, sql, vizConfig }) => {
-    const vizPanelRef = usePanelRef();
-    const [isVizCollapsed, setIsVizCollapsed] = useState(false);
-
-    if (!data || data.length === 0) {
+export const ResultsView: React.FC<ResultsViewProps> = ({ results }) => {
+    if (!results || results.length === 0) {
         return (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800 p-8 border-dashed">
-                <Database size={48} className="mb-4 opacity-50" />
-                <p>No data to display yet.</p>
-                <p className="text-sm mt-1">Run a query to see results here.</p>
-            </div>
-        );
-    }
-
-    const columns = Object.keys(data[0]);
-
-    if (!vizConfig) {
-        return (
-            <div className="h-full flex flex-col bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
-                <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
-                    <h3 className="font-semibold text-white flex items-center gap-2">
-                        <Table size={18} className="text-blue-400" />
-                        Query Results
-                    </h3>
-                    <span className="text-xs text-slate-400 bg-slate-900 px-2 py-1 rounded-md border border-slate-700">
-                        {data.length} rows found
-                    </span>
-                </div>
-                <div className="flex-1 overflow-auto custom-scrollbar">
-                    <TableContent columns={columns} data={data} />
-                </div>
+            <div className="h-full flex flex-col items-center justify-center text-foundry-500 bg-foundry-950 rounded-sm border border-foundry-800 border-dashed">
+                <Database size={32} className="mb-2 opacity-30" />
+                <p className="text-xs uppercase tracking-widest opacity-70">No Data Stream</p>
             </div>
         );
     }
 
     return (
-        <div className="h-full flex flex-col bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
-            <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shrink-0 z-10">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                    <Table size={18} className="text-blue-400" />
-                    Query Results
-                </h3>
-                <span className="text-xs text-slate-400 bg-slate-900 px-2 py-1 rounded-md border border-slate-700">
-                    {data.length} rows found
+        <div className="h-full bg-foundry-950 flex flex-col overflow-y-auto custom-scrollbar gap-4 p-2">
+            {results.map((result) => (
+                <ResultItem key={result.id} result={result} />
+            ))}
+        </div>
+    );
+};
+
+const ResultItem = ({ result }: { result: QueryResult }) => {
+    const vizPanelRef = usePanelRef();
+    const [isVizCollapsed, setIsVizCollapsed] = useState(false);
+    const columns = result.data.length > 0 ? Object.keys(result.data[0]) : [];
+
+    return (
+        <div className="flex flex-col bg-foundry-950 rounded-sm border border-foundry-800 overflow-hidden shadow-sm shrink-0">
+            <div className="bg-foundry-900 px-3 py-2 border-b border-foundry-800 flex justify-between items-center shrink-0">
+                <div className="flex flex-col gap-0.5 max-w-[70%]">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-foundry-200 flex items-center gap-2 truncate">
+                        <Terminal size={12} className="text-accent-gold" />
+                        <span className="truncate" title={result.query}>{result.query}</span>
+                    </h3>
+                    <div className="flex items-center gap-2 text-[10px] text-foundry-500 font-mono">
+                        <Clock size={10} />
+                        <span>{new Date(result.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+                <span className="text-[10px] font-mono text-foundry-500 bg-foundry-950 px-1.5 py-0.5 border border-foundry-800 rounded-sm whitespace-nowrap">
+                    {result.data.length} RECORDS
                 </span>
             </div>
 
-            <PanelGroup orientation="vertical" className="flex-1 min-h-0">
-                {/* Panel 1: Table (Top) */}
-                <Panel className="flex flex-col min-h-0 bg-slate-900">
+            <div className="h-[400px] flex flex-col">
+                {result.vizConfig ? (
+                    <PanelGroup orientation="vertical" className="flex-1 min-h-0">
+                        {/* Panel 1: Table (Top) */}
+                        <Panel className="flex flex-col min-h-0 bg-foundry-950">
+                            <div className="flex-1 overflow-auto custom-scrollbar">
+                                <TableContent columns={columns} data={result.data} />
+                            </div>
+                        </Panel>
+
+                        <PanelResizeHandle className="h-2 bg-foundry-900 hover:bg-accent-600/50 transition-colors border-y border-foundry-800 flex justify-center items-center group cursor-row-resize">
+                            <div className="w-8 h-0.5 bg-foundry-700 group-hover:bg-foundry-200 rounded-full" />
+                            <button
+                                onClick={() => {
+                                    const p = vizPanelRef.current;
+                                    if (p) p.isCollapsed() ? p.expand() : p.collapse();
+                                }}
+                                className="absolute right-4 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-foundry-800 text-foundry-200 rounded hover:bg-accent-600"
+                            >
+                                {isVizCollapsed ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                            </button>
+                        </PanelResizeHandle>
+
+                        {/* Panel 2: Chart (Bottom) */}
+                        <Panel
+                            panelRef={vizPanelRef}
+                            defaultSize={40}
+                            minSize={25}
+                            collapsible
+                            onResize={(size) => {
+                                const isCollapsed = size.asPercentage === 0;
+                                if (isCollapsed !== isVizCollapsed) {
+                                    setIsVizCollapsed(isCollapsed);
+                                }
+                            }}
+                            className="flex flex-col min-h-0 bg-foundry-900/30"
+                        >
+                            <div className="h-full p-2 overflow-hidden">
+                                <VizContent data={result.data} config={result.vizConfig} />
+                            </div>
+                        </Panel>
+                    </PanelGroup>
+                ) : (
                     <div className="flex-1 overflow-auto custom-scrollbar">
-                        <TableContent columns={columns} data={data} />
+                        <TableContent columns={columns} data={result.data} />
                     </div>
-                </Panel>
-
-                <PanelResizeHandle className="h-4 flex items-center justify-center bg-slate-800/50 hover:bg-slate-700/50 transition-colors group relative z-10 focus:outline-none border-y border-slate-700/50">
-                    <div className="w-12 h-1 bg-slate-600 rounded-full group-hover:bg-blue-500/50 transition-colors flex items-center justify-center">
-                        <GripHorizontal size={12} className="text-slate-400" />
-                    </div>
-                    <button
-                        onClick={() => {
-                            const p = vizPanelRef.current;
-                            if (p) p.isCollapsed() ? p.expand() : p.collapse();
-                        }}
-                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-slate-800 rounded-full border border-slate-600 hover:bg-slate-700 z-20"
-                    >
-                        {isVizCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                </PanelResizeHandle>
-
-                {/* Panel 2: Chart (Bottom) */}
-                <Panel
-                    panelRef={vizPanelRef}
-                    defaultSize={40}
-                    minSize={25}
-                    collapsible
-                    onResize={(size) => {
-                        const isCollapsed = size.asPercentage === 0;
-                        if (isCollapsed !== isVizCollapsed) {
-                            setIsVizCollapsed(isCollapsed);
-                        }
-                    }}
-                    className="flex flex-col min-h-0 border-t border-slate-700"
-                >
-                    <div className="h-full p-4 overflow-hidden bg-slate-900/50">
-                        <VizContent data={data} config={vizConfig} />
-                    </div>
-                </Panel>
-            </PanelGroup>
+                )}
+            </div>
         </div>
     );
 };
 
 const TableContent = ({ columns, data }: { columns: string[], data: any[] }) => (
-    <table className="w-full text-left text-sm text-slate-300">
-        <thead className="bg-slate-800/50 text-slate-400 sticky top-0 backdrop-blur-sm z-10">
+    <table className="w-full text-left text-xs font-mono text-foundry-400 border-collapse">
+        <thead className="bg-foundry-900/80 backdrop-blur sticky top-0 z-10">
             <tr>
                 {columns.map((col) => (
-                    <th key={col} className="px-6 py-3 font-medium uppercase text-xs tracking-wider border-b border-slate-700">
+                    <th key={col} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-wider border-b border-r border-foundry-800 text-foundry-500 last:border-r-0 select-none">
                         {col.replace(/_/g, ' ')}
                     </th>
                 ))}
             </tr>
         </thead>
-        <tbody className="divide-y divide-slate-800">
+        <tbody className="bg-foundry-950">
             {data.map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                <tr key={idx} className="hover:bg-foundry-900 transition-colors group">
                     {columns.map((col) => (
-                        <td key={`${idx}-${col}`} className="px-6 py-4 whitespace-nowrap">
+                        <td key={`${idx}-${col}`} className="px-3 py-1.5 whitespace-nowrap border-b border-r border-foundry-800/50 last:border-r-0 text-foundry-300 group-hover:text-foundry-100">
                             {row[col]}
                         </td>
                     ))}

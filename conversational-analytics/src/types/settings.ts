@@ -15,6 +15,7 @@ export interface DatabaseConfig {
     database?: string;
     username?: string;
     password?: string;
+    ssl?: boolean;
 }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
@@ -26,3 +27,12 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
 export const DEFAULT_DB_CONFIG: DatabaseConfig = {
     type: 'mock'
 };
+
+export interface QueryResult {
+    id: string;
+    query: string;
+    sql: string;
+    data: any[];
+    vizConfig?: any;
+    timestamp: number;
+}

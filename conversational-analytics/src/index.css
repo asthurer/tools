@@ -1,3 +1,82 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    /* Silver/Grey Light Theme */
+    --c-foundry-950: 240 242 245;
+    /* #f0f2f5 - Main BG (Silver Grey) */
+    --c-foundry-900: 229 231 235;
+    /* #e5e7eb - Panel BG */
+    --c-foundry-800: 209 213 219;
+    /* #d1d5db - Border */
+    --c-foundry-700: 156 163 175;
+    /* #9ca3af - Input/Hover */
+    --c-foundry-500: 107 114 128;
+    /* #6b7280 - Muted Text */
+    --c-foundry-400: 55 65 81;
+    /* #374151 - Body Text */
+    --c-foundry-200: 17 24 39;
+    /* #111827 - Headings */
+    --c-foundry-100: 0 0 0;
+    /* #000000 - Highlights */
+  }
+
+  .dark {
+    /* Void Black Dark Theme */
+    --c-foundry-950: 10 10 10;
+    /* #0a0a0a */
+    --c-foundry-900: 17 17 17;
+    /* #111111 */
+    --c-foundry-800: 28 28 28;
+    /* #1c1c1c */
+    --c-foundry-700: 42 42 42;
+    /* #2a2a2a */
+    --c-foundry-500: 85 85 85;
+    /* #555555 */
+    --c-foundry-400: 136 136 136;
+    /* #888888 */
+    --c-foundry-200: 229 229 229;
+    /* #e5e5e5 */
+    --c-foundry-100: 255 255 255;
+    /* #ffffff */
+  }
+
+  body {
+    @apply bg-foundry-950 text-foundry-400 font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-foundry-200 font-semibold tracking-tight;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-foundry-900;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-foundry-700 rounded-sm;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-foundry-500;
+  }
+
+  .glass-panel {
+    @apply bg-foundry-900/80 backdrop-blur border border-foundry-800;
+  }
+}

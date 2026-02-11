@@ -4,9 +4,9 @@ import { ChatInterface } from './components/ChatInterface';
 import { ResultsView } from './components/ResultsView';
 import { generateSQL } from './services/ai';
 import { executeSQL } from './utils/sqlRunner';
-import { Settings, Sparkles, Database as DbIcon, ChevronLeft, ChevronRight, Table, GripVertical } from 'lucide-react';
+import { Settings, Sparkles, Database as DbIcon, ChevronLeft, Table, Sun, Moon } from 'lucide-react';
 import { DataConnect } from './components/DataConnect';
-import { DEFAULT_AI_SETTINGS, DEFAULT_DB_CONFIG, type AISettings, type DatabaseConfig, type AIProviderType } from './types/settings';
+import { DEFAULT_AI_SETTINGS, DEFAULT_DB_CONFIG, type AISettings, type DatabaseConfig, type QueryResult } from './types/settings';
 
 interface Message {
   id: string;
@@ -22,8 +22,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeData, setActiveData] = useState<any[]>([]);
-  const [activeVizConfig, setActiveVizConfig] = useState<any>(null);
+  const [results, setResults] = useState<QueryResult[]>([]);
   const [activeTab, setActiveTab] = useState<'results' | 'data'>('data');
 
   const chatPanelRef = usePanelRef();
@@ -41,6 +40,23 @@ function App() {
     const saved = localStorage.getItem('conversational_analytics_db');
     return saved ? JSON.parse(saved) : DEFAULT_DB_CONFIG;
   });
+
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('conversational_analytics_theme');
+    return (saved as 'dark' | 'light') || 'dark';
+  });
+
+  // Apply Theme
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
+    localStorage.setItem('conversational_analytics_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
 
   // Persist settings
   useEffect(() => {
@@ -80,20 +96,38 @@ function App() {
       const generatedSQL = aiResponse.sql;
 
       // 3. Execute SQL
-      const result = executeSQL(generatedSQL, dbConfig);
+      const result = await executeSQL(generatedSQL, dbConfig);
 
       if (result.success) {
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `I found ${result.data?.length} results for your query.`,
-          sql: generatedSQL,
-          data: result.data,
-          vizConfig: aiResponse.visualization
-        }]);
-        setActiveData(result.data || []);
-        setActiveVizConfig(aiResponse.visualization);
-        setActiveTab('results'); // Auto-switch to results
+        if (result.data && result.data.length > 0) {
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `I found ${(result.data || []).length} results for your query.`,
+            sql: generatedSQL,
+            data: result.data,
+            vizConfig: aiResponse.visualization
+          }]);
+
+          const newResult: QueryResult = {
+            id: Date.now().toString(),
+            query: content,
+            sql: generatedSQL,
+            data: result.data || [],
+            vizConfig: aiResponse.visualization,
+            timestamp: Date.now()
+          };
+
+          setResults(prev => [newResult, ...prev]);
+          setActiveTab('results'); // Auto-switch to results
+        } else {
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `0 records returned for your query.`,
+            sql: generatedSQL
+          }]);
+        }
       } else {
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
@@ -116,85 +150,90 @@ function App() {
   };
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-100 font-sans flex flex-col overflow-hidden">
+    <div className="h-screen bg-foundry-950 text-foundry-200 font-sans flex flex-col overflow-hidden">
       {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl my-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Settings size={20} className="text-blue-400" />
-                Configuration
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-foundry-900 border border-foundry-700 rounded-sm p-0 w-full max-w-2xl shadow-2xl my-8">
+            <div className="bg-foundry-950 px-6 py-4 border-b border-foundry-800 flex justify-between items-center">
+              <h2 className="text-sm font-bold text-foundry-100 uppercase tracking-widest flex items-center gap-2">
+                <Settings size={16} className="text-accent-400" />
+                System Configuration
               </h2>
-              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <button onClick={() => setShowSettings(false)} className="text-foundry-500 hover:text-accent-danger transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            <div className="space-y-6">
+            <div className="p-6 space-y-6">
               {/* AI Configuration */}
-              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-                <h3 className="text-sm font-bold text-slate-300 uppercase mb-4 flex items-center gap-2">
-                  <Sparkles size={16} className="text-purple-400" />
-                  AI Model Configuration
+              <div className="bg-foundry-950/50 rounded-sm p-4 border border-foundry-800">
+                <h3 className="text-xs font-bold text-foundry-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Sparkles size={14} className="text-accent-gold" />
+                  AI Model Parameters
                 </h3>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">AI Provider</label>
-                    <select
-                      value={aiSettings.provider}
-                      onChange={(e) => updateAISetting('provider', e.target.value as AIProviderType)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="gemini">Google Gemini</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="claude">Anthropic Claude</option>
-                    </select>
+                  <div className="grid grid-cols-12 gap-4 items-center">
+                    <label className="col-span-3 text-xs font-bold text-foundry-500 uppercase">Provider</label>
+                    <div className="col-span-9">
+                      <select
+                        value={aiSettings.provider}
+                        onChange={(e) => updateAISetting('provider', e.target.value as any)}
+                        className="w-full bg-foundry-900 border border-foundry-700 rounded-sm px-3 py-1.5 text-sm text-foundry-200 focus:outline-none focus:border-accent-500 font-mono"
+                      >
+                        <option value="gemini">Google Gemini</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="claude">Anthropic Claude</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Model Name</label>
-                    <input
-                      type="text"
-                      value={aiSettings.model}
-                      onChange={(e) => updateAISetting('model', e.target.value)}
-                      placeholder={aiSettings.provider === 'gemini' ? 'gemini-1.5-flash' : aiSettings.provider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022'}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      {aiSettings.provider === 'gemini' && "Try: gemini-1.5-flash, gemini-1.5-pro"}
-                      {aiSettings.provider === 'openai' && "Try: gpt-4o, gpt-4o-mini"}
-                      {aiSettings.provider === 'claude' && "Try: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022"}
-                    </p>
+                  <div className="grid grid-cols-12 gap-4 items-center">
+                    <label className="col-span-3 text-xs font-bold text-foundry-500 uppercase">Model ID</label>
+                    <div className="col-span-9">
+                      <input
+                        type="text"
+                        value={aiSettings.model}
+                        onChange={(e) => updateAISetting('model', e.target.value)}
+                        placeholder={aiSettings.provider === 'gemini' ? 'gemini-1.5-flash' : aiSettings.provider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022'}
+                        className="w-full bg-foundry-900 border border-foundry-700 rounded-sm px-3 py-1.5 text-sm text-foundry-200 focus:outline-none focus:border-accent-500 font-mono"
+                      />
+                      <p className="text-[10px] text-foundry-500 mt-1 font-mono">
+                        {aiSettings.provider === 'gemini' && "Recommended: gemini-1.5-flash, gemini-1.5-pro"}
+                        {aiSettings.provider === 'openai' && "Recommended: gpt-4o, gpt-4o-mini"}
+                        {aiSettings.provider === 'claude' && "Recommended: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022"}
+                      </p>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">API Key</label>
-                    <input
-                      type="password"
-                      value={aiSettings.apiKey}
-                      onChange={(e) => updateAISetting('apiKey', e.target.value)}
-                      placeholder={`Enter your ${aiSettings.provider === 'openai' ? 'OpenAI' : aiSettings.provider === 'claude' ? 'Anthropic' : 'Google AI'} API Key`}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="text-xs text-slate-500 mt-2">Your key is stored locally in your browser.</p>
+                  <div className="grid grid-cols-12 gap-4 items-center">
+                    <label className="col-span-3 text-xs font-bold text-foundry-500 uppercase">API Key</label>
+                    <div className="col-span-9">
+                      <input
+                        type="password"
+                        value={aiSettings.apiKey}
+                        onChange={(e) => updateAISetting('apiKey', e.target.value)}
+                        placeholder={`Enter ${aiSettings.provider === 'openai' ? 'OpenAI' : aiSettings.provider === 'claude' ? 'Anthropic' : 'Google AI'} API Key`}
+                        className="w-full bg-foundry-900 border border-foundry-700 rounded-sm px-3 py-1.5 text-sm text-foundry-200 focus:outline-none focus:border-accent-500 font-mono"
+                      />
+                      <p className="text-[10px] text-foundry-500 mt-2 font-mono">Keys are encrypted and stored locally via localStorage protocol.</p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-2 border-t border-foundry-800">
                 <button
                   onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  className="px-4 py-2 text-foundry-400 hover:text-foundry-200 text-xs font-bold uppercase tracking-wide transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-900/40"
+                  className="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white rounded-sm text-xs font-bold uppercase tracking-wide transition-colors shadow-glow"
                 >
                   Save Configuration
                 </button>
@@ -205,49 +244,56 @@ function App() {
       )}
 
       {/* Header */}
-      <header className="bg-slate-900/50 border-b border-slate-800 backdrop-blur-md sticky top-0 z-20 shrink-0">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <a href="/tools/" className="text-slate-400 hover:text-white hover:bg-slate-800 p-2 rounded-lg transition-all">
-              <ChevronLeft size={20} />
-            </a>
-            <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
-                <Sparkles size={20} className="text-white" />
-              </div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-300">
-                Conversational Analytics
-              </h1>
-            </div>
+      <header className="bg-foundry-950 border-b border-foundry-800 shrink-0 h-10 flex items-center px-4 justify-between select-none">
+        <div className="flex items-center gap-4">
+          <a href="/tools/" className="text-foundry-500 hover:text-foundry-200 transition-colors">
+            <ChevronLeft size={16} />
+          </a>
+          <div className="flex items-center gap-2 border-l border-foundry-800 pl-4">
+            <img src="/tools/conversational-analytics/logo.svg" alt="Logo" className="w-5 h-5" />
+            <h1 className="text-xs font-bold text-foundry-200 uppercase tracking-widest">
+              Conversational Analytics <span className="text-foundry-600 font-normal">v2.0</span>
+            </h1>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="hidden md:flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-success animate-pulse"></div>
+            <span className="text-[10px] text-foundry-500 font-mono uppercase">System Online</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-800/50 rounded-full border border-slate-700/50">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-xs text-slate-400 font-medium">System Online</span>
-            </div>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors relative"
-            >
-              <Settings size={20} />
-              {!aiSettings.apiKey && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
-              )}
-            </button>
-          </div>
+          <div className="h-4 w-[1px] bg-foundry-800 mx-2"></div>
+
+          <button
+            onClick={toggleTheme}
+            className="text-foundry-500 hover:text-foundry-200 transition-colors"
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
+          <button
+            onClick={() => setShowSettings(true)}
+            className="text-foundry-500 hover:text-accent-400 transition-colors relative"
+          >
+            <Settings size={16} />
+            {!aiSettings.apiKey && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-accent-gold rounded-full"></span>
+            )}
+          </button>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-[1920px] mx-auto p-4 md:p-6 overflow-hidden flex flex-col h-full bg-slate-950">
+      <main className="flex-1 w-full max-w-[1920px] mx-auto overflow-hidden flex flex-col h-full bg-foundry-950">
 
         {/* Desktop Split View */}
         <div className="hidden lg:block flex-1 min-h-0 h-full">
           <PanelGroup orientation="horizontal" className="h-full">
             <Panel
               panelRef={chatPanelRef}
-              defaultSize={40}
+              defaultSize={35}
               minSize={25}
               collapsible
               onResize={(size) => {
@@ -258,7 +304,7 @@ function App() {
               }}
               className="flex flex-col min-h-0"
             >
-              <div className="h-full pr-2">
+              <div className="h-full">
                 <ChatInterface
                   messages={messages}
                   onSendMessage={handleSendMessage}
@@ -267,36 +313,13 @@ function App() {
               </div>
             </Panel>
 
-            <PanelResizeHandle className="w-4 flex items-center justify-center bg-transparent group relative z-10 focus:outline-none">
-              <div className="w-1 h-12 bg-slate-700/50 rounded-full group-hover:bg-blue-500/50 transition-colors mx-auto flex items-center justify-center">
-                <GripVertical size={12} className="text-slate-500" />
-              </div>
-              {/* Custom collapse buttons showing on hover */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-8 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                <button
-                  onClick={() => {
-                    const p = chatPanelRef.current;
-                    if (p) p.isCollapsed() ? p.expand() : p.collapse();
-                  }}
-                  className="pointer-events-auto p-1 bg-slate-800 rounded-full border border-slate-700 hover:bg-slate-700"
-                >
-                  {isChatCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-                </button>
-                <button
-                  onClick={() => {
-                    const p = resultsPanelRef.current;
-                    if (p) p.isCollapsed() ? p.expand() : p.collapse();
-                  }}
-                  className="pointer-events-auto p-1 bg-slate-800 rounded-full border border-slate-700 hover:bg-slate-700"
-                >
-                  {isResultsCollapsed ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
-                </button>
-              </div>
+            <PanelResizeHandle className="w-1 bg-foundry-950 hover:bg-accent-600/50 transition-colors flex items-center justify-center group focus:outline-none border-x border-foundry-800 cursor-col-resize">
+              <div className="w-0.5 h-8 bg-foundry-700 group-hover:bg-foundry-200 rounded-full" />
             </PanelResizeHandle>
 
             <Panel
               panelRef={resultsPanelRef}
-              defaultSize={60}
+              defaultSize={65}
               minSize={25}
               collapsible
               onResize={(size) => {
@@ -305,42 +328,42 @@ function App() {
                   setIsResultsCollapsed(isCollapsed);
                 }
               }}
-              className="flex flex-col min-h-0"
+              className="flex flex-col min-h-0 bg-foundry-950"
             >
-              <div className="h-full pl-2 flex flex-col min-h-0">
-                <div className="flex gap-2 p-1 bg-slate-900 rounded-lg w-fit border border-slate-800 mb-4 shrink-0">
+              <div className="h-full flex flex-col min-h-0">
+                <div className="flex border-b border-foundry-800 bg-foundry-900">
                   <button
                     onClick={() => setActiveTab('data')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'data'
-                      ? 'bg-slate-800 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                    className={`flex items-center gap-2 px-4 py-1.5 text-xs font-bold uppercase tracking-wide transition-all border-r border-foundry-800 ${activeTab === 'data'
+                      ? 'bg-foundry-800 text-foundry-100 border-b-2 border-b-accent-400'
+                      : 'text-foundry-500 hover:text-foundry-300'
                       }`}
                   >
-                    <DbIcon size={16} />
+                    <DbIcon size={14} />
                     Data Source
                   </button>
                   <button
                     onClick={() => setActiveTab('results')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'results'
-                      ? 'bg-slate-800 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                    className={`flex items-center gap-2 px-4 py-1.5 text-xs font-bold uppercase tracking-wide transition-all border-r border-foundry-800 ${activeTab === 'results'
+                      ? 'bg-foundry-800 text-foundry-100 border-b-2 border-b-accent-400'
+                      : 'text-foundry-500 hover:text-foundry-300'
                       }`}
                   >
-                    <Table size={16} />
+                    <Table size={14} />
                     Query Results
-                    {activeData.length > 0 && (
-                      <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">
-                        {activeData.length}
+                    {results.length > 0 && (
+                      <span className="bg-accent-600 text-white text-[9px] px-1 rounded-sm">
+                        {results.length}
                       </span>
                     )}
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-hidden min-h-0 h-full">
+                <div className="flex-1 overflow-hidden min-h-0 h-full p-0 bg-foundry-900/50">
                   {activeTab === 'data' ? (
                     <DataConnect config={dbConfig} onUpdate={updateDBSetting} />
                   ) : (
-                    <ResultsView data={activeData} vizConfig={activeVizConfig} />
+                    <ResultsView results={results} />
                   )}
                 </div>
               </div>
@@ -349,27 +372,27 @@ function App() {
         </div>
 
         {/* Mobile View (Stacked) */}
-        <div className="lg:hidden flex flex-col gap-6 overflow-y-auto min-h-0 pb-20">
-          <div className="h-[500px] shrink-0">
+        <div className="lg:hidden flex flex-col gap-0 overflow-y-auto min-h-0 pb-0">
+          <div className="h-[500px] shrink-0 border-b border-foundry-800">
             <ChatInterface
               messages={messages}
               onSendMessage={handleSendMessage}
               isLoading={isLoading}
             />
           </div>
-          <div className="shrink-0 flex flex-col gap-4">
-            <div className="flex gap-2 p-1 bg-slate-900 rounded-lg w-fit border border-slate-800">
+          <div className="shrink-0 flex flex-col min-h-[500px] bg-foundry-950">
+            <div className="flex border-b border-foundry-800 bg-foundry-900">
               <button
                 onClick={() => setActiveTab('data')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'data' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase w-1/2 justify-center ${activeTab === 'data' ? 'bg-foundry-800 text-foundry-100 border-b-2 border-b-accent-400' : 'text-foundry-500'}`}
               >
-                <DbIcon size={16} /> Data
+                <DbIcon size={14} /> Data
               </button>
               <button
                 onClick={() => setActiveTab('results')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'results' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase w-1/2 justify-center ${activeTab === 'results' ? 'bg-foundry-800 text-foundry-100 border-b-2 border-b-accent-400' : 'text-foundry-500'}`}
               >
-                <Table size={16} /> Results
+                <Table size={14} /> Results
               </button>
             </div>
 
@@ -377,7 +400,7 @@ function App() {
               {activeTab === 'data' ? (
                 <DataConnect config={dbConfig} onUpdate={updateDBSetting} />
               ) : (
-                <ResultsView data={activeData} vizConfig={activeVizConfig} />
+                <ResultsView results={results} />
               )}
             </div>
           </div>

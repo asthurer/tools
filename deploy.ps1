@@ -66,7 +66,7 @@ Write-Host "Deploying Root Portal (index.html, tools.json, favicon)..."
 
 # Create temp tar for root files
 $rootTar = "root_deploy.tar"
-tar -cf $rootTar index.html tools.json favicon.png
+tar -cf $rootTar index.html tools.json favicon.png og-image.png
 
 if (Test-Path $rootTar) {
     # Upload

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, User, Bot } from 'lucide-react';
+import { Send, Bot } from 'lucide-react';
 
 interface Message {
     id: string;
@@ -37,81 +37,91 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMe
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700 shadow-xl">
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+        <div className="flex flex-col h-full bg-foundry-900 border-r border-foundry-800">
+            <div className="flex-1 overflow-y-auto p-0 custom-scrollbar font-mono text-sm">
                 {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
-                        <Bot size={48} className="mb-4" />
-                        <p className="text-lg">Ask a question about your data to get started.</p>
-                        <p className="text-sm mt-2">Example: "Show me the top selling products"</p>
+                    <div className="flex flex-col items-center justify-center h-full text-foundry-500 opacity-60">
+                        <Bot size={32} className="mb-2 opacity-50" />
+                        <p className="text-xs uppercase tracking-widest">System Ready</p>
+                        <p className="text-[10px] mt-1 font-mono text-foundry-600">Awaiting Input...</p>
                     </div>
                 )}
 
                 {messages.map((msg) => (
                     <div
                         key={msg.id}
-                        className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        className={`group border-b border-foundry-800/50 px-4 py-3 hover:bg-foundry-800/20 transition-colors ${msg.role === 'user' ? 'bg-foundry-950/30' : ''}`}
                     >
-                        <div
-                            className={`max-w-[85%] rounded-2xl p-4 ${msg.role === 'user'
-                                ? 'bg-blue-600 text-white rounded-br-none'
-                                : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'
-                                }`}
-                        >
-                            <div className="flex items-start gap-3">
-                                <div className={`mt-1 p-1 rounded-full ${msg.role === 'user' ? 'bg-blue-500' : 'bg-slate-700'}`}>
-                                    {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
-                                </div>
-                                <div className="flex-1 overflow-x-auto">
-                                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <div className="flex gap-3">
+                            <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold ${msg.role === 'user' ? 'bg-accent-600 text-white' : 'bg-foundry-700 text-foundry-200'
+                                }`}>
+                                {msg.role === 'user' ? '>' : '#'}
+                            </div>
 
-                                    {msg.sql && (
-                                        <div className="mt-3 bg-slate-950 rounded-md p-3 font-mono text-xs text-green-400 overflow-x-auto border border-slate-800">
-                                            <div className="text-slate-500 text-[10px] uppercase mb-1">Generated SQL</div>
-                                            {msg.sql}
-                                        </div>
-                                    )}
-
-                                    {msg.error && (
-                                        <div className="mt-3 bg-red-900/20 text-red-300 rounded-md p-3 text-sm border border-red-900/50">
-                                            Error: {msg.error}
-                                        </div>
-                                    )}
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline gap-2 mb-1">
+                                    <span className={`text-xs font-bold uppercase tracking-wide ${msg.role === 'user' ? 'text-accent-400' : 'text-foundry-400'}`}>
+                                        {msg.role === 'user' ? 'USER' : 'SYSTEM'}
+                                    </span>
+                                    <span className="text-[10px] text-foundry-600 font-mono">{new Date().toLocaleTimeString([], { hour12: false })}</span>
                                 </div>
+
+                                <div className="text-foundry-200 whitespace-pre-wrap leading-relaxed">
+                                    {msg.content}
+                                </div>
+
+                                {msg.sql && (
+                                    <div className="mt-2 bg-black border border-foundry-800 rounded-sm p-2 overflow-x-auto">
+                                        <div className="flex justify-between items-center mb-1 border-b border-foundry-800 pb-1">
+                                            <span className="text-[10px] text-foundry-500 font-bold uppercase">Generated SQL</span>
+                                            <span className="text-[10px] text-accent-success">Verified</span>
+                                        </div>
+                                        <pre className="text-xs text-accent-gold font-mono">{msg.sql}</pre>
+                                    </div>
+                                )}
+
+                                {msg.error && (
+                                    <div className="mt-2 text-accent-danger text-xs border-l-2 border-accent-danger pl-2 py-1 bg-accent-danger/5">
+                                        ANOMALY DETECTED: {msg.error}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
                 ))}
 
                 {isLoading && (
-                    <div className="flex justify-start">
-                        <div className="bg-slate-800 text-slate-200 rounded-2xl rounded-bl-none border border-slate-700 p-4">
-                            <div className="flex items-center gap-2">
-                                <Bot size={16} className="text-slate-400" />
-                                <span className="animate-pulse">Analyzing data...</span>
-                            </div>
+                    <div className="px-4 py-3 border-b border-foundry-800/50 animate-pulse bg-foundry-800/10">
+                        <div className="flex gap-3">
+                            <div className="w-4 h-4 bg-foundry-700 rounded flex-shrink-0 animate-spin" />
+                            <div className="h-4 bg-foundry-800 rounded w-1/3" />
                         </div>
                     </div>
                 )}
+
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="p-4 bg-slate-800 border-t border-slate-700">
-                <form onSubmit={handleSubmit} className="flex gap-2">
+            <div className="p-2 border-t border-foundry-800 bg-foundry-900">
+                <form onSubmit={handleSubmit} className="flex gap-0 bg-foundry-950 border border-foundry-700 rounded-sm focus-within:ring-1 focus-within:ring-accent-500 transition-all">
+                    <div className="px-3 py-2 text-foundry-500 font-mono text-sm border-r border-foundry-800 select-none">
+                        $
+                    </div>
                     <input
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask a question about your data..."
-                        className="flex-1 bg-slate-900 text-white placeholder-slate-500 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        placeholder="Execute command or query..."
+                        className="flex-1 bg-transparent text-foundry-100 placeholder-foundry-600 px-3 py-2 text-sm font-mono focus:outline-none"
                         disabled={isLoading}
+                        autoFocus
                     />
                     <button
                         type="submit"
                         disabled={isLoading || !input.trim()}
-                        className="bg-blue-600 hover:bg-blue-500 text-white rounded-xl px-6 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-3 text-foundry-500 hover:text-accent-400 disabled:opacity-30 disabled:hover:text-foundry-500 transition-colors"
                     >
-                        <Send size={20} />
+                        <Send size={14} />
                     </button>
                 </form>
             </div>

@@ -88,5 +88,15 @@
         "gradient": "from-cyan-400 to-blue-500",
         "icon": "M13 10V3L4 14h7v7l9-11h-7z",
         "status": "Beta"
+    },
+    {
+        "id": "webhook-tester",
+        "name": "Webhook Tester",
+        "description": "Inspect and debug HTTP requests in real-time. Includes local relay server for localhost testing.",
+        "path": "/tools/webhook-tester/",
+        "color": "emerald",
+        "gradient": "from-emerald-400 to-green-500",
+        "icon": "M13 10V3L4 14h7v7l9-11h-7z",
+        "status": "Beta"
     }
 ]

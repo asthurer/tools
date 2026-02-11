@@ -34,7 +34,12 @@ export const generateSQL = async (
     1. Return ONLY a JSON object. Do not include markdown formatting.
     2. Use standard SQL compatible with AlaSQL.
     3. Supported commands: SELECT, SHOW TABLES, DESCRIBE [table].
-    4. Today's date is ${new Date().toISOString().split('T')[0]}.
+    4. IMPORTANT: Do NOT use SQLite functions like STRFTIME(). Use standard SQL functions:
+       - YEAR(date) for year extraction
+       - MONTH(date) for month extraction
+       - DAY(date) for day extraction
+       - FORMAT(date, 'yyyy-MM-dd') for formatting
+    5. Today's date is ${new Date().toISOString().split('T')[0]}.
     5. If the question cannot be answered, return a JSON with an "error" field explaining why.
     6. If the user asks for a visualization (chart, graph, plot) OR if the data is suitable for visualization (aggregations, trends):
        - "bar": For categorical comparisons (e.g., sales by product).
